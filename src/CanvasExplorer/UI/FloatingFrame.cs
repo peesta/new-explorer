@@ -49,6 +49,8 @@ public class FloatingFrame : Grid
     bool _selected;
 
     public ResizeEdges Edges { get; set; } = ResizeEdges.All;
+    /// <summary>Width of the resize zone at the right edge (narrower where a scroll bar runs next to it).</summary>
+    public double RightGripZone { get; set; } = GripZone;
     public bool IsMovable { get; set; } = true;
     public double MinW { get; set; } = 180;
     public double MinH { get; set; } = 100;
@@ -164,7 +166,7 @@ public class FloatingFrame : Grid
     {
         var e = ResizeEdges.None;
         if (p.X <= GripZone) e |= ResizeEdges.Left;
-        else if (p.X >= ActualWidth - GripZone) e |= ResizeEdges.Right;
+        else if (p.X >= ActualWidth - RightGripZone) e |= ResizeEdges.Right;
         if (p.Y <= GripZone) e |= ResizeEdges.Top;
         else if (p.Y >= ActualHeight - GripZone) e |= ResizeEdges.Bottom;
         return e & Edges;

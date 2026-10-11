@@ -64,9 +64,68 @@ public partial class FileListView : UserControl
 
         _density = Math.Clamp(AppSettings.Current.Density, 0, 2);
         ApplyMode();
+        List.PreviewMouseWheel += OnListWheel;
+        _thumbSizeTimer.Tick += (_, _) => { _thumbSizeTimer.Stop(); LoadThumbnails(); };
+        TileScale = AppSettings.Current.TileScale;
     }
 
     public IExplorerHost? Host { get; set; }
+
+    // ---------- tile size (Ctrl + wheel in the grid view) ----------
+
+    const double MinTileScale = 0.6, MaxTileScale = 3;
+
+    public static readonly DependencyProperty TileScaleProperty = DependencyProperty.Register(
+        nameof(TileScale), typeof(double), typeof(FileListView), new PropertyMetadata(1.0, (d, _) => ((FileListView)d).OnTileScale()));
+    static readonly DependencyPropertyKey TileWidthKey = DependencyProperty.RegisterReadOnly(nameof(TileWidth), typeof(double), typeof(FileListView), new PropertyMetadata(100.0));
+    static readonly DependencyPropertyKey TileHeightKey = DependencyProperty.RegisterReadOnly(nameof(TileHeight), typeof(double), typeof(FileListView), new PropertyMetadata(108.0));
+    static readonly DependencyPropertyKey ThumbWidthKey = DependencyProperty.RegisterReadOnly(nameof(ThumbWidth), typeof(double), typeof(FileListView), new PropertyMetadata(92.0));
+    static readonly DependencyPropertyKey ThumbHeightKey = DependencyProperty.RegisterReadOnly(nameof(ThumbHeight), typeof(double), typeof(FileListView), new PropertyMetadata(64.0));
+    static readonly DependencyPropertyKey ChipScaleKey = DependencyProperty.RegisterReadOnly(nameof(ChipScale), typeof(Transform), typeof(FileListView), new PropertyMetadata(Transform.Identity));
+    public static readonly DependencyProperty TileWidthProperty = TileWidthKey.DependencyProperty;
+    public static readonly DependencyProperty TileHeightProperty = TileHeightKey.DependencyProperty;
+    public static readonly DependencyProperty ThumbWidthProperty = ThumbWidthKey.DependencyProperty;
+    public static readonly DependencyProperty ThumbHeightProperty = ThumbHeightKey.DependencyProperty;
+    public static readonly DependencyProperty ChipScaleProperty = ChipScaleKey.DependencyProperty;
+
+    /// <summary>Size of the tiles (1 = normal); the canvas zoom is separate.</summary>
+    public double TileScale { get => (double)GetValue(TileScaleProperty); set => SetValue(TileScaleProperty, Math.Clamp(value, MinTileScale, MaxTileScale)); }
+    public double TileWidth => (double)GetValue(TileWidthProperty);
+    public double TileHeight => (double)GetValue(TileHeightProperty);
+    public double ThumbWidth => (double)GetValue(ThumbWidthProperty);
+    public double ThumbHeight => (double)GetValue(ThumbHeightProperty);
+    public Transform ChipScale => (Transform)GetValue(ChipScaleProperty);
+
+    readonly System.Windows.Threading.DispatcherTimer _thumbSizeTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+
+    void OnTileScale()
+    {
+        var s = TileScale;
+        var w = Math.Round(92 * s);
+        var h = Math.Round(64 * s);
+        SetValue(ThumbWidthKey, w);
+        SetValue(ThumbHeightKey, h);
+        SetValue(TileWidthKey, w + 8);
+        // Name (two lines) under the picture.
+        SetValue(TileHeightKey, h + 44);
+        // The type chip grows more slowly than the picture.
+        var chip = Math.Clamp(1 + (s - 1) * 0.6, 0.75, 2);
+        var t = new ScaleTransform(chip, chip);
+        t.Freeze();
+        SetValue(ChipScaleKey, t);
+        AppSettings.Current.TileScale = Math.Round(s, 3);
+        AppSettings.ScheduleSave();
+        // Bigger tiles want sharper pictures: fetch them once the wheel stops.
+        _thumbSizeTimer.Stop();
+        _thumbSizeTimer.Start();
+    }
+
+    void OnListWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (!_grid || Keyboard.Modifiers != ModifierKeys.Control) return;
+        TileScale = TileScale * (e.Delta > 0 ? 1.15 : 1 / 1.15);
+        e.Handled = true;
+    }
     public IReadOnlyList<FileItem> Items => _items;
     public int PinnedCount { get; set; }
 
@@ -100,6 +159,7 @@ public partial class FileListView : UserControl
     }
 
     CancellationTokenSource? _thumbs;
+    int _thumbPx;
 
     /// <summary>In the tile view, images and videos get their pictures (in the background, cached).</summary>
     void LoadThumbnails()
@@ -107,10 +167,15 @@ public partial class FileListView : UserControl
         _thumbs?.Cancel();
         _thumbs = null;
         if (!_grid) return;
-        var wanted = _items.Where(i => i.HasThumbnail && i.Thumb == null).ToList();
+        // Pictures come in a few sizes; a bigger tile asks for the next one (the old picture stays until then).
+        var need = Math.Ceiling(ThumbWidth * Math.Max(1, VisualTreeHelper.GetDpi(this).DpiScaleX));
+        var px = need <= 96 ? 96 : need <= 192 ? 192 : need <= 320 ? 320 : 512;
+        var grow = px > _thumbPx;
+        _thumbPx = Math.Max(_thumbPx, px);
+        var wanted = _items.Where(i => i.HasThumbnail && (i.Thumb == null || grow)).ToList();
         if (wanted.Count == 0) return;
         var cts = _thumbs = new CancellationTokenSource();
-        var px = (int)Math.Ceiling(96 * Math.Max(1, VisualTreeHelper.GetDpi(this).DpiScaleX));
+        px = _thumbPx;
         foreach (var item in wanted)
         {
             _ = ShellThumbnails.GetAsync(item.FullPath, item.Modified, px, cts.Token).ContinueWith(t =>

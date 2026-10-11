@@ -23,6 +23,8 @@ public sealed class AppSettings
     public List<Favorite>? Favorites { get; set; }
     /// <summary>Volume of the audio player (0…1); the last level set is used for every new player.</summary>
     public double AudioVolume { get; set; } = 0.8;
+    /// <summary>Size of tiles in the grid view (Ctrl + wheel), 1 = normal.</summary>
+    public double TileScale { get; set; } = 1;
     public string? LastFolder { get; set; }
     public List<string>? Tabs { get; set; }
     public int ActiveTab { get; set; }

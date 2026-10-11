@@ -113,6 +113,7 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
         RestoreWindowBounds();
         _sidebar = new Sidebar(SidePanel, SideBorder, this);
         _sidebar.Build();
+        SideStack.Children.Add(new MiniPlayer(ShowInFolder));
         _drivesTimer.Tick += (_, _) => { _drivesTimer.Stop(); _sidebar.Build(); };
         TagStore.Current.Changed += (_, _) => Dispatcher.BeginInvoke(OnTagsChanged);
     }
@@ -214,6 +215,7 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
     {
         CanvasArea.SaveNow();
         CanvasArea.FlushPins();
+        AudioEngine.Current.Close();
         _settingsTimer.Stop();
         SaveSettings();
         _watcher?.Dispose();
@@ -455,10 +457,12 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
         };
         var dir = new DirectoryInfo(folder);
         // Enumerating also throws UnauthorizedAccessException for the folder itself, which the caller reports.
-        var list = dir.EnumerateFileSystemInfos("*", options)
+        var infos = dir.EnumerateFileSystemInfos("*", options)
             .Where(i => i.Name != LayoutStore.FileName && !i.Name.EndsWith(".~tmp", StringComparison.OrdinalIgnoreCase))
-            .Select(i => new FileItem(i) { Tags = TagMark.For(i.FullName) })
             .ToList();
+        // Tags live in the files themselves: files brought here by other programs bring theirs.
+        TagStore.Current.Reconcile(folder, infos.Select(i => i.FullName));
+        var list = infos.Select(i => new FileItem(i) { Tags = TagMark.For(i.FullName) }).ToList();
         SortItems(list);
         return list;
     }

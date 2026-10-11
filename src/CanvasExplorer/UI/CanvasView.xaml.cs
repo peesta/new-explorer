@@ -59,6 +59,8 @@ public partial class CanvasView : UserControl
         // Working in the list deselects the pinned window, so Delete can never reach it from there.
         _listFrame.Activated += (_, _) => Select(null);
         _listFrame.FrameCornerRadius = 8;
+        // The list's scroll bar sits right after this zone, close to the edge, without taking the resize away.
+        _listFrame.RightGripZone = 4;
         System.Windows.Automation.AutomationProperties.SetAutomationId(_listFrame, "ListWindow");
         Panel.SetZIndex(_listFrame, 0);
         World.Children.Add(_listFrame);

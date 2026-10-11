@@ -183,6 +183,28 @@ public class TagTests : IDisposable
     }
 
     [Fact]
+    public void Tag_travels_inside_the_file_when_another_program_moves_it()
+    {
+        _app.SeedTags(("t1", "Срочно", "#E5484D", null));
+        var file = _app.WriteFile("счёт.pdf");
+        var target = _app.MakeDir("Архив");
+        _app.Launch();
+        _app.ClickRow("счёт.pdf", Button.Right);
+        _app.MenuItem("Теги");
+        _app.MenuItem("Срочно");
+        Wait.Until(() => File.Exists(file + ":canvas.tags"), because: "тег записан в сам файл");
+
+        // Moved by "Explorer" while the app is closed.
+        _app.Close();
+        var moved = Path.Combine(target, "счёт.pdf");
+        File.Move(file, moved);
+        _app.Launch(target);
+        Wait.Until(() => _app.TagIdsOf(moved).SequenceEqual(new[] { "t1" }), because: "тег найден на новом месте");
+        Wait.Until(() => _app.SideCount("Срочно") == "1", because: "счётчик тега");
+        Assert.Empty(_app.TagIdsOf(file));
+    }
+
+    [Fact]
     public void Deleting_a_tag_from_its_menu_asks_and_removes_it()
     {
         _app.SeedTags(("t1", "Старый", "#7A7A7A", null));

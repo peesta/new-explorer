@@ -79,6 +79,66 @@ public class ViewTests : IDisposable
     }
 
     [Fact]
+    public void Ctrl_wheel_resizes_the_tiles_and_not_the_canvas()
+    {
+        WritePng("фото.png", Colors.SeaGreen);
+        for (var i = 0; i < 6; i++) _app.WriteFile($"файл {i}.txt");
+        _app.Launch();
+        _app.Click(_app.Get("ViewGrid"));
+        Wait.Until(() => IsOn("ViewGrid"));
+        var w0 = AppSession.Bounds(_app.Row("фото.png")).Width;
+
+        var over = AppSession.Center(_app.Row("файл 3.txt"));
+        With(Ctrl, () => Input.Wheel(over, 3));
+        Wait.Until(() => AppSession.Bounds(_app.Row("фото.png")).Width > w0 * 1.35, because: "плитки стали крупнее");
+        Assert.False(File.Exists(_app.LayoutPath()), "холст не создан и не масштабирован");
+
+        With(Ctrl, () => Input.Wheel(over, -6));
+        Wait.Until(() => AppSession.Bounds(_app.Row("фото.png")).Width < w0 * 0.85, because: "плитки стали мельче");
+        Wait.Until(() => _app.Settings().GetProperty("TileScale").GetDouble() < 0.9, because: "размер плиток запомнен");
+
+        // The picture follows the tile size.
+        var thumb = Wait.For(() => _app.Row("фото.png").FindFirst(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.AutomationIdProperty, "Thumb")), 5000, "превью");
+        Assert.True(AppSession.Bounds(thumb).Width <= AppSession.Bounds(_app.Row("фото.png")).Width);
+    }
+
+    [Fact]
+    public void List_scroll_bar_is_close_to_the_edge_and_the_edge_still_resizes()
+    {
+        for (var i = 0; i < 80; i++) _app.WriteFile($"файл {i:00}.txt");
+        _app.Launch();
+        var frame = AppSession.Bounds(_app.Get("ListWindow"));
+        var list = AppSession.Bounds(_app.List);
+        Input.MoveTo(new Point(frame.X + 40, frame.Y + 40)); // not hovering the thumb (it changes colour)
+        Thread.Sleep(300);
+        // Find the scroll thumb (#3A3A3A) on screen, walking left from the window's right edge.
+        var dpi = GetDpiForWindow(_app.Hwnd) / 96.0;
+        var row = (int)(list.Y + 30 * dpi);
+        int? thumbRight = null;
+        var dc = GetDC(IntPtr.Zero);
+        try
+        {
+            for (var x = (int)frame.Right - 1; x > frame.Right - 30 * dpi; x--)
+            {
+                var c = GetPixel(dc, x, row);
+                int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
+                if (Math.Abs(r - 0x3A) <= 3 && Math.Abs(g - 0x3A) <= 3 && Math.Abs(b - 0x3A) <= 3) { thumbRight = x; break; }
+            }
+        }
+        finally { ReleaseDC(IntPtr.Zero, dc); }
+        Assert.NotNull(thumbRight);
+        var gap = (frame.Right - thumbRight!.Value) / dpi;
+        // Was 9–14 px from the edge; now right after the 4 px resize zone.
+        Assert.InRange(gap, 4, 7);
+
+        // The outermost pixels still belong to the window edge: pulling it inward makes a canvas.
+        var y = frame.Y + frame.Height / 2;
+        Input.Drag(Button.Left, 100, new Point(frame.Right - 2, y), new Point(frame.Right - 300, y));
+        Wait.Until(() => _app.Layout() != null, because: "правый край списка по-прежнему меняет размер");
+    }
+
+    [Fact]
     public void Audio_player_starts_at_the_last_volume_set_in_any_player()
     {
         File.Copy(Path.Combine(RepoRoot(), "samples", "Пример", "Голосовая.wav"), Path.Combine(_app.Work, "голос.wav"));
@@ -110,6 +170,15 @@ public class ViewTests : IDisposable
             new PropertyCondition(AutomationElement.AutomationIdProperty, "Volume")), 5000, "регулятор после перезапуска");
         Assert.InRange(Range(again), 22, 28);
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern uint GetDpiForWindow(IntPtr hwnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetDC(IntPtr hwnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    static extern uint GetPixel(IntPtr dc, int x, int y);
 
     static double Range(AutomationElement e) => ((RangeValuePattern)e.GetCurrentPattern(RangeValuePattern.Pattern)).Current.Value;
 

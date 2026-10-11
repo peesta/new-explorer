@@ -118,6 +118,91 @@ public class TagStoreTests : IDisposable
     }
 
     [Fact]
+    public void Tags_are_written_into_the_file_itself_without_changing_its_date()
+    {
+        var store = new TagStore(StoreFile);
+        var tag = store.Create("Срочно", "#E5484D", null);
+        var file = File("отчёт.txt", "данные");
+        var stamp = new DateTime(2020, 5, 1, 12, 0, 0, DateTimeKind.Utc);
+        System.IO.File.SetLastWriteTimeUtc(file, stamp);
+
+        store.Set(new[] { file }, tag.Id, true);
+        Assert.True(System.IO.File.Exists(file + TagStore.StreamName), "поток с тегами создан");
+        Assert.Contains("Срочно", System.IO.File.ReadAllText(file + TagStore.StreamName));
+        Assert.Equal(stamp, System.IO.File.GetLastWriteTimeUtc(file));
+        Assert.Equal("данные", System.IO.File.ReadAllText(file));
+
+        store.Set(new[] { file }, tag.Id, false);
+        Assert.False(System.IO.File.Exists(file + TagStore.StreamName), "без тегов поток удалён");
+        Assert.Equal(stamp, System.IO.File.GetLastWriteTimeUtc(file));
+    }
+
+    [Fact]
+    public void A_file_moved_by_another_program_keeps_its_tags()
+    {
+        var store = new TagStore(StoreFile);
+        var tag = store.Create("Мебель", "#8764B8", null);
+        var file = File(@"Откуда\стол.jpg");
+        store.Set(new[] { file }, tag.Id, true);
+
+        // Moved outside the app: the index still points at the old place.
+        Directory.CreateDirectory(Path.Combine(_dir, "Куда"));
+        var moved = Path.Combine(_dir, "Куда", "стол.jpg");
+        System.IO.File.Move(file, moved);
+
+        store.Reconcile(Path.Combine(_dir, "Куда"), new[] { moved });
+        store.Reconcile(Path.Combine(_dir, "Откуда"), Array.Empty<string>());
+        Assert.True(store.Has(moved, tag.Id));
+        Assert.Equal(new[] { moved }, store.PathsOf(tag.Id));
+    }
+
+    [Fact]
+    public void Another_computer_recreates_the_tag_from_the_file()
+    {
+        var mine = new TagStore(StoreFile);
+        var tag = mine.Create("Идеи", null, "bulb");
+        var file = File("заметка.md");
+        mine.Set(new[] { file }, tag.Id, true);
+
+        var other = new TagStore(Path.Combine(_dir, "other-tags.json"));
+        Assert.Empty(other.Tags);
+        other.Reconcile(_dir, new[] { file });
+        var seen = Assert.Single(other.TagsOf(file));
+        Assert.Equal("Идеи", seen.Name);
+        Assert.Equal("bulb", seen.Icon);
+    }
+
+    [Fact]
+    public void A_lost_stream_is_written_again_from_the_index()
+    {
+        var store = new TagStore(StoreFile);
+        var tag = store.Create("Т", "#0078D4", null);
+        var file = File("doc.txt", "1");
+        store.Set(new[] { file }, tag.Id, true);
+        // An editor that saves through a temporary file drops the stream.
+        System.IO.File.Delete(file);
+        System.IO.File.WriteAllText(file, "2");
+        Assert.False(System.IO.File.Exists(file + TagStore.StreamName));
+
+        store.Reconcile(_dir, new[] { file });
+        Assert.True(store.Has(file, tag.Id));
+        Assert.True(System.IO.File.Exists(file + TagStore.StreamName), "поток восстановлен");
+    }
+
+    [Fact]
+    public void Read_only_files_can_be_tagged()
+    {
+        var store = new TagStore(StoreFile);
+        var tag = store.Create("Т", "#0078D4", null);
+        var file = File("ro.txt");
+        System.IO.File.SetAttributes(file, FileAttributes.ReadOnly);
+        store.Set(new[] { file }, tag.Id, true);
+        Assert.True(System.IO.File.Exists(file + TagStore.StreamName));
+        Assert.True(System.IO.File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly), "атрибут вернулся");
+        System.IO.File.SetAttributes(file, FileAttributes.Normal);
+    }
+
+    [Fact]
     public void Broken_file_starts_empty()
     {
         System.IO.File.WriteAllText(StoreFile, "{ broken");

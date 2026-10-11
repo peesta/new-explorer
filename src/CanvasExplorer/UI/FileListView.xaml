@@ -3,6 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="clr-namespace:CanvasExplorer.UI">
     <UserControl.Resources>
+        <!-- The list's scroll bar sits 1 px further right than elsewhere: its thumb starts right after the
+             4 px resize zone of the list window (FloatingFrame.RightGripZone), close to the edge. -->
+        <Style x:Key="ListScrollBar" TargetType="ScrollBar" BasedOn="{StaticResource {x:Type ScrollBar}}">
+            <Setter Property="Margin" Value="0,0,-1,0"/>
+        </Style>
         <Style x:Key="TileItem" TargetType="ListBoxItem" BasedOn="{StaticResource FileRow}">
             <Setter Property="Padding" Value="4,0"/>
             <Setter Property="Margin" Value="2"/>
@@ -128,10 +133,14 @@
         <!-- Grid tiles -->
         <!-- Images and videos show their picture (Windows thumbnail), everything else the type chip -->
         <DataTemplate x:Key="Tile">
-            <Grid Width="100" Height="108" ToolTip="{Binding Tip}" ToolTipService.InitialShowDelay="900">
+            <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=ui:FileListView}}"
+                  Height="{Binding TileHeight, RelativeSource={RelativeSource AncestorType=ui:FileListView}}"
+                  ToolTip="{Binding Tip}" ToolTipService.InitialShowDelay="900">
                 <StackPanel Margin="0,6,0,0" Tag="grab" Background="Transparent">
-                    <Grid Width="92" Height="64" Tag="grab">
+                    <Grid Width="{Binding ThumbWidth, RelativeSource={RelativeSource AncestorType=ui:FileListView}}"
+                          Height="{Binding ThumbHeight, RelativeSource={RelativeSource AncestorType=ui:FileListView}}" Tag="grab">
                         <Border Width="44" Height="44" CornerRadius="6" Background="{Binding ChipBg}" Tag="grab" Visibility="{Binding TileChipVisibility}"
+                                LayoutTransform="{Binding ChipScale, RelativeSource={RelativeSource AncestorType=ui:FileListView}}"
                                 ToolTip="…" ToolTipOpening="Chip_ToolTipOpening" ToolTipService.InitialShowDelay="350" ToolTipService.Placement="Right" ToolTipService.HorizontalOffset="8">
                             <Grid>
                                 <TextBlock Text="{Binding Ext}" FontSize="11" FontWeight="Bold" Foreground="{Binding ChipFg}"
@@ -144,7 +153,9 @@
                                 Visibility="{Binding ThumbVisibility}">
                             <Grid>
                                 <Image AutomationProperties.AutomationId="Thumb" Source="{Binding Thumb}" Stretch="Uniform"
-                                       MaxWidth="92" MaxHeight="64" RenderOptions.BitmapScalingMode="HighQuality" Tag="grab"/>
+                                       MaxWidth="{Binding ThumbWidth, RelativeSource={RelativeSource AncestorType=ui:FileListView}}"
+                                       MaxHeight="{Binding ThumbHeight, RelativeSource={RelativeSource AncestorType=ui:FileListView}}"
+                                       RenderOptions.BitmapScalingMode="HighQuality" Tag="grab"/>
                                 <Border Width="18" Height="18" CornerRadius="9" Background="#99000000" HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                         Margin="4" Visibility="{Binding VideoBadgeVisibility}" IsHitTestVisible="False">
                                     <ui:Icon Data="{x:Static ui:Icons.Play}" Size="8" Filled="True" Foreground="White" Margin="1,0,0,0"
@@ -174,7 +185,7 @@
             <!-- Header strip: also the handle for moving the list window -->
             <Border x:Name="Header" Background="Transparent" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1"
                     ui:FloatingFrame.IsDragHandle="True">
-                <Grid x:Name="HeaderColumns" Margin="14,0,20,0">
+                <Grid x:Name="HeaderColumns" Margin="14,0,17,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="72"/>
@@ -187,10 +198,14 @@
             </Border>
 
             <ListBox x:Name="List" Grid.Row="1" Style="{StaticResource FlatList}" ItemContainerStyle="{StaticResource FileRow}"
-                     SelectionMode="Extended" Margin="6,4,6,0" AllowDrop="True"
-                     TextSearch.TextPath="Name" IsTextSearchEnabled="True"/>
+                     SelectionMode="Extended" Margin="6,4,3,0" AllowDrop="True"
+                     TextSearch.TextPath="Name" IsTextSearchEnabled="True">
+                <ListBox.Resources>
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ListScrollBar}"/>
+                </ListBox.Resources>
+            </ListBox>
 
-            <Canvas x:Name="MarqueeLayer" Grid.Row="1" Margin="6,4,6,0" IsHitTestVisible="False" ClipToBounds="True">
+            <Canvas x:Name="MarqueeLayer" Grid.Row="1" Margin="6,4,3,0" IsHitTestVisible="False" ClipToBounds="True">
                 <Rectangle x:Name="Marquee" Visibility="Collapsed" Fill="{DynamicResource AccentSoftBrush}"
                            Stroke="{DynamicResource AccentBrush}" StrokeThickness="1" RadiusX="2" RadiusY="2"/>
             </Canvas>

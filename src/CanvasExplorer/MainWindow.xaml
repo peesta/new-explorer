@@ -22,9 +22,12 @@
             <!-- Sidebar (resizable horizontally; its right outline lights up while resizing) -->
             <Grid WindowChrome.IsHitTestVisibleInChrome="True">
                 <Border x:Name="SideBorder" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="8">
-                    <ScrollViewer Style="{StaticResource OverlayScroll}" VerticalScrollBarVisibility="Auto" Padding="6,10,6,10">
-                        <StackPanel x:Name="SidePanel"/>
-                    </ScrollViewer>
+                    <!-- Favorites, drives and tags scroll; the player under them stays in place -->
+                    <ui:SidebarStack x:Name="SideStack">
+                        <ScrollViewer x:Name="SideScroll" Style="{StaticResource OverlayScroll}" VerticalScrollBarVisibility="Auto" Padding="6,10,6,10">
+                            <StackPanel x:Name="SidePanel"/>
+                        </ScrollViewer>
+                    </ui:SidebarStack>
                 </Border>
                 <ui:EdgeGlow x:Name="SideGlow" CornerRadius="8"/>
             </Grid>

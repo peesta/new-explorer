@@ -3,60 +3,55 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Threading;
 using CanvasExplorer.Models;
 using CanvasExplorer.Services;
 using CanvasExplorer.UI;
-using NAudio.Wave;
 
 namespace CanvasExplorer.Previews;
 
-/// <summary>Audio player: waveform with seek, play/pause, loop, volume. One player sounds at a time.</summary>
+/// <summary>
+/// Audio file on the canvas: waveform with seek, play/pause, repeat, volume. Playback itself belongs to the app-wide
+/// <see cref="AudioEngine"/> (it goes on in the sidebar's mini player when this window or its folder is closed);
+/// this window shows and controls it while its file is the one loaded. The file is not kept open.
+/// </summary>
 public sealed class AudioPreview : PreviewContent
 {
-    static AudioPreview? _playing;
+    static AudioEngine Engine => AudioEngine.Current;
 
     readonly WaveformView _wave = new();
     readonly VolumeBar _volume = new();
     readonly Button _playBtn;
-    readonly Icon _playIcon;
+    readonly UI.Icon _playIcon;
     readonly Button _loopBtn;
     readonly TextBlock _time;
     readonly TextBlock _meta;
-    readonly DispatcherTimer _tick;
-    readonly CancellationTokenSource _cts = new();
-    WaveStream? _reader;
-    WaveOutEvent? _output;
-    bool _loop;
-    bool _stoppingByUser;
+    TimeSpan _duration;
+    /// <summary>Where play starts while another file (or none) is loaded in the player.</summary>
+    TimeSpan _start;
+    bool _unloaded;
 
     public AudioPreview(FileItem item) : base(item)
     {
         var mono = new FontFamily("Cascadia Mono, Consolas");
 
-        _playIcon = new Icon(UI.Icons.Play, 12) { Filled = true };
-        _playBtn = new Button { Width = 30, Height = 30, Content = _playIcon, Style = (Style)Application.Current.FindResource("RoundAccentButton"), ToolTip = "Воспроизвести (пробел)" };
+        _playIcon = new UI.Icon(UI.Icons.Play, 12) { Filled = true };
+        _playBtn = new Button { Width = 30, Height = 30, Content = _playIcon, Style = (Style)Application.Current.FindResource("RoundAccentButton"), ToolTip = "Воспроизвести (пробел)", IsEnabled = false };
         _playBtn.Click += (_, _) => Toggle();
 
         var startBtn = SmallButton(UI.Icons.SkipBack, "В начало", () => Seek(0), filled: true);
-        _loopBtn = SmallButton(UI.Icons.Loop, "Повтор", ToggleLoop);
+        _loopBtn = SmallButton(UI.Icons.Loop, "Повтор", () => Engine.Loop = !Engine.Loop);
 
         _time = new TextBlock { FontFamily = mono, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0), Text = "0:00 / 0:00" };
         _time.SetResourceReference(TextBlock.ForegroundProperty, "SubBrush");
 
-        var volIcon = new Icon(UI.Icons.Volume, 14) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
-        volIcon.SetResourceReference(Icon.ForegroundProperty, "SubBrush");
+        var volIcon = new UI.Icon(UI.Icons.Volume, 14) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        volIcon.SetResourceReference(UI.Icon.ForegroundProperty, "SubBrush");
         _volume.Width = 64;
         _volume.Height = 16;
         _volume.VerticalAlignment = VerticalAlignment.Center;
-        // Every player starts at the level last set in any player (remembered across canvases and restarts).
-        _volume.Value = Math.Clamp(AppSettings.Current.AudioVolume, 0, 1);
-        _volume.ValueChanged += (_, v) =>
-        {
-            if (_output != null) _output.Volume = (float)v;
-            AppSettings.Current.AudioVolume = Math.Round(v, 3);
-            AppSettings.ScheduleSave();
-        };
+        // One volume for the whole app: the last level set anywhere.
+        _volume.Value = Engine.Volume;
+        _volume.ValueChanged += (_, v) => Engine.Volume = v;
 
         var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(startBtn);
@@ -92,10 +87,10 @@ public sealed class AudioPreview : PreviewContent
         _meta = new TextBlock { FontFamily = mono, FontSize = 10, VerticalAlignment = VerticalAlignment.Center };
         _meta.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
 
-        _tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
-        _tick.Tick += (_, _) => UpdatePosition();
-
+        Engine.Changed += OnEngine;
+        Engine.Tick += OnTick;
         _ = LoadAsync();
+        UpdateView();
     }
 
     public override FrameworkElement? HeaderExtra => _meta;
@@ -106,30 +101,33 @@ public sealed class AudioPreview : PreviewContent
         Toggle();
         return true;
     }
+
     public override Size PreferredSize => new(460, 136);
+
+    bool IsCurrent => Engine.IsCurrent(Item.FullPath);
 
     async Task LoadAsync()
     {
         var path = Item.FullPath;
         try
         {
-            _reader = await Task.Run(() => (WaveStream)new MediaFoundationReader(path));
-            var f = _reader.WaveFormat;
-            _meta.Text = Item.Ext + " · " + (f.SampleRate / 1000.0).ToString("0.#") + " кГц · " +
-                         (f.Channels == 1 ? "моно" : f.Channels == 2 ? "стерео" : f.Channels + " кан.");
-            UpdatePosition();
+            var info = await AudioEngine.ReadInfoAsync(path);
+            _duration = info.Duration;
+            _meta.Text = Item.Ext + " · " + (info.SampleRate / 1000.0).ToString("0.#") + " кГц · " +
+                         (info.Channels == 1 ? "моно" : info.Channels == 2 ? "стерео" : info.Channels + " кан.");
+            _playBtn.IsEnabled = true;
+            UpdateView();
         }
         catch
         {
             _meta.Text = "формат не поддерживается";
-            _playBtn.IsEnabled = false;
             return;
         }
 
         try
         {
-            var token = _cts.Token;
-            _wave.Peaks = await Task.Run(() => ComputePeaks(path, 800, token), token);
+            var peaks = await AudioEngine.PeaksAsync(path);
+            if (!_unloaded) _wave.Peaks = peaks;
         }
         catch
         {
@@ -137,113 +135,48 @@ public sealed class AudioPreview : PreviewContent
         }
     }
 
-    static float[] ComputePeaks(string path, int buckets, CancellationToken token)
-    {
-        using var reader = new MediaFoundationReader(path);
-        var provider = reader.ToSampleProvider();
-        var bytesPerSample = Math.Max(1, reader.WaveFormat.BitsPerSample / 8);
-        var totalSamples = Math.Max(1, reader.Length / bytesPerSample);
-        var perBucket = Math.Max(1, totalSamples / buckets);
-        var peaks = new float[buckets];
-        var buffer = new float[8192];
-        long index = 0;
-        int read;
-        while ((read = provider.Read(buffer, 0, buffer.Length)) > 0)
-        {
-            token.ThrowIfCancellationRequested();
-            for (var i = 0; i < read; i++, index++)
-            {
-                var b = (int)Math.Min(buckets - 1, index / perBucket);
-                var v = Math.Abs(buffer[i]);
-                if (v > peaks[b]) peaks[b] = v;
-            }
-        }
-        var max = peaks.Max();
-        if (max > 0) for (var i = 0; i < peaks.Length; i++) peaks[i] /= max;
-        return peaks;
-    }
-
-    void EnsureOutput()
-    {
-        if (_output != null || _reader == null) return;
-        _output = new WaveOutEvent { DesiredLatency = 120 };
-        _output.Init(_reader);
-        _output.Volume = (float)_volume.Value;
-        _output.PlaybackStopped += (_, _) => Dispatcher.BeginInvoke(OnStopped);
-    }
-
     void Toggle()
     {
-        if (_reader == null) return;
-        EnsureOutput();
-        if (_output!.PlaybackState == PlaybackState.Playing)
-        {
-            Pause();
-            return;
-        }
-        if (_playing != null && _playing != this) _playing.Pause();
-        _playing = this;
-        if (_reader.CurrentTime >= _reader.TotalTime - TimeSpan.FromMilliseconds(50)) _reader.CurrentTime = TimeSpan.Zero;
-        _output.Play();
-        _tick.Start();
-        SetPlayingVisual(true);
-    }
-
-    void Pause()
-    {
-        if (_output?.PlaybackState != PlaybackState.Playing) return;
-        _stoppingByUser = true;
-        _output.Pause();
-        _stoppingByUser = false;
-        _tick.Stop();
-        SetPlayingVisual(false);
-        UpdatePosition();
-    }
-
-    void OnStopped()
-    {
-        if (_stoppingByUser || _reader == null) return;
-        // Reached the end of the file.
-        _reader.CurrentTime = TimeSpan.Zero;
-        if (_loop && _output != null)
-        {
-            _output.Play();
-            return;
-        }
-        _tick.Stop();
-        SetPlayingVisual(false);
-        UpdatePosition();
+        if (!_playBtn.IsEnabled) return;
+        Engine.Toggle(Item.FullPath, _start);
     }
 
     void Seek(double fraction)
     {
-        if (_reader == null) return;
-        _reader.CurrentTime = TimeSpan.FromTicks((long)(_reader.TotalTime.Ticks * Math.Clamp(fraction, 0, 1)));
-        UpdatePosition();
+        var to = TimeSpan.FromTicks((long)(Duration.Ticks * Math.Clamp(fraction, 0, 1)));
+        if (IsCurrent) Engine.Seek(to);
+        else _start = to;
+        UpdateView();
     }
 
-    void ToggleLoop()
+    TimeSpan Duration => IsCurrent ? Engine.Duration : _duration;
+    TimeSpan Position => IsCurrent ? Engine.Position : _start;
+
+    void OnEngine(object? sender, EventArgs e) => UpdateView();
+
+    void OnTick(object? sender, EventArgs e)
     {
-        _loop = !_loop;
-        _loopBtn.SetResourceReference(Control.ForegroundProperty, _loop ? "AccentBrush" : "SubBrush");
+        if (IsCurrent) UpdatePosition();
     }
 
-    void SetPlayingVisual(bool playing)
+    void UpdateView()
     {
+        var playing = IsCurrent && Engine.IsPlaying;
         _playIcon.Data = playing ? UI.Icons.Pause : UI.Icons.Play;
         _playBtn.ToolTip = playing ? "Пауза (пробел)" : "Воспроизвести (пробел)";
+        System.Windows.Automation.AutomationProperties.SetName(_playBtn, playing ? "Пауза" : "Воспроизвести");
+        _loopBtn.SetResourceReference(Control.ForegroundProperty, Engine.Loop ? "AccentBrush" : "SubBrush");
+        if (Math.Abs(_volume.Value - Engine.Volume) > 0.0005) _volume.Value = Engine.Volume;
+        UpdatePosition();
     }
 
     void UpdatePosition()
     {
-        if (_reader == null) return;
-        var total = _reader.TotalTime;
-        var cur = _reader.CurrentTime;
+        var total = Duration;
+        var cur = Position;
         _wave.Progress = total.Ticks > 0 ? (double)cur.Ticks / total.Ticks : 0;
-        _time.Text = Fmt(cur) + " / " + Fmt(total);
+        _time.Text = AudioEngine.Format(cur) + " / " + AudioEngine.Format(total);
     }
-
-    static string Fmt(TimeSpan t) => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
 
     Button SmallButton(Geometry icon, string tip, Action click, bool filled = false)
     {
@@ -252,7 +185,7 @@ public sealed class AudioPreview : PreviewContent
             Width = 24,
             Height = 24,
             ToolTip = tip,
-            Content = new Icon(icon, 13) { Filled = filled, StrokeWidth = 2 },
+            Content = new UI.Icon(icon, 13) { Filled = filled, StrokeWidth = 2 },
             Style = (Style)Application.Current.FindResource("IconButton"),
         };
         b.SetResourceReference(Control.ForegroundProperty, filled ? "TextBrush" : "SubBrush");
@@ -260,17 +193,12 @@ public sealed class AudioPreview : PreviewContent
         return b;
     }
 
+    /// <summary>The window goes away; the music does not (it carries on in the sidebar player).</summary>
     public override void Unload()
     {
-        _cts.Cancel();
-        _tick.Stop();
-        if (_playing == this) _playing = null;
-        _stoppingByUser = true;
-        _output?.Stop();
-        _output?.Dispose();
-        _reader?.Dispose();
-        _output = null;
-        _reader = null;
+        _unloaded = true;
+        Engine.Changed -= OnEngine;
+        Engine.Tick -= OnTick;
     }
 }
 
