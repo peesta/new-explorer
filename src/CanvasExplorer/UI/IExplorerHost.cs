@@ -18,4 +18,5 @@ public interface IExplorerHost
     void RefreshFolder();
     void RenameItem(FileItem item);
     void CreateFolder();
+    void CreateFile(string baseName, string extension);
 }

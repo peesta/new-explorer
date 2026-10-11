@@ -99,6 +99,19 @@ public partial class FileListView : UserControl
         _filter = text.Trim();
         _view.Refresh();
         UpdateCount();
+        if (_items.Count > 0)
+            ShowMessage(_filter.Length > 0 && _view.IsEmpty ? "Ничего не найдено" : null);
+    }
+
+    /// <summary>Short fade/slide-in used when another folder is shown.</summary>
+    public void PlayEnter()
+    {
+        var move = new TranslateTransform(0, 6);
+        List.RenderTransform = move;
+        var duration = TimeSpan.FromMilliseconds(Anim.Short);
+        var ease = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
+        List.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, duration) { EasingFunction = ease });
+        move.BeginAnimation(TranslateTransform.YProperty, new System.Windows.Media.Animation.DoubleAnimation(6, 0, duration) { EasingFunction = ease });
     }
 
     public void ShowMessage(string? text)
@@ -176,6 +189,7 @@ public partial class FileListView : UserControl
 
         List.ItemTemplate = (DataTemplate)Resources[_grid ? "Tile" : _density switch { 0 => "RowL", 2 => "RowS", _ => "RowM" }];
         List.ItemsPanel = (ItemsPanelTemplate)Resources[_grid ? "WrapTpl" : "StackTpl"];
+        List.ItemContainerStyle = (Style)(_grid ? Resources["TileItem"] : FindResource("FileRow"));
         ScrollViewer.SetCanContentScroll(List, !_grid);
         HeaderColumns.Visibility = _grid ? Visibility.Hidden : Visibility.Visible;
         DensityGroup.Opacity = _grid ? 0.5 : 1;
@@ -411,6 +425,9 @@ public partial class FileListView : UserControl
             case Key.V when mods == ModifierKeys.Control:
                 Paste();
                 break;
+            case Key.Escape when sel.Count > 0:
+                List.SelectedItems.Clear();
+                break;
             case Key.N when mods == (ModifierKeys.Control | ModifierKeys.Shift):
                 Host?.CreateFolder();
                 break;
@@ -441,22 +458,26 @@ public partial class FileListView : UserControl
         DragDrop.DoDragDrop(List, data, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
     }
 
+    /// <summary>Folder a drop lands in: the folder row under the cursor, else the current folder.</summary>
+    string? DropTarget(DragEventArgs e, string[] files)
+    {
+        if (ItemAt(e.OriginalSource) is { IsFolder: true } folder && !files.Any(f => Shell.SameFolder(f, folder.FullPath)))
+            return folder.FullPath;
+        return Host?.CurrentFolder;
+    }
+
     void OnDragOver(object sender, DragEventArgs e)
     {
         e.Effects = DragDropEffects.None;
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0 && Host?.CurrentFolder is { } folder &&
-            !files.All(f => Shell.SameFolder(Path.GetDirectoryName(f), folder)))
-            e.Effects = (e.KeyStates & DragDropKeyStates.ShiftKey) != 0 ? DragDropEffects.Move : DragDropEffects.Copy;
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0 && DropTarget(e, files) is { } dest)
+            e.Effects = Shell.DropEffect(files, dest, e.KeyStates, e.AllowedEffects);
         e.Handled = true;
     }
 
     void OnDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || Host?.CurrentFolder is not { } folder) return;
-        var outside = files.Where(f => !Shell.SameFolder(Path.GetDirectoryName(f), folder)).ToList();
-        if (outside.Count == 0) return;
-        if ((e.KeyStates & DragDropKeyStates.ShiftKey) != 0) Shell.Move(outside, folder, Host.Hwnd);
-        else Shell.Copy(outside, folder, Host.Hwnd);
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || Host == null || DropTarget(e, files) is not { } dest) return;
+        e.Effects = Shell.Drop(e, dest, Host.Hwnd);
         e.Handled = true;
     }
 
@@ -519,7 +540,11 @@ public partial class FileListView : UserControl
         var hasCanvas = Host?.HasCanvas == true;
         return Menus.Build(
             Menus.Item("Вставить", Icons.Paste, Paste, "Ctrl+V", enabled: Shell.CanPaste()),
-            Menus.Item("Создать папку", Icons.FolderPlus, () => Host?.CreateFolder(), "Ctrl+Shift+N"),
+            Menus.Sub("Создать", Icons.NewFile,
+                Menus.Item("Папку", Icons.FolderPlus, () => Host?.CreateFolder(), "Ctrl+Shift+N"),
+                Menus.Sep(),
+                Menus.Item("Текстовый документ", Icons.TextFile, () => Host?.CreateFile("Новый текстовый документ", ".txt")),
+                Menus.Item("Документ Markdown", Icons.TextFile, () => Host?.CreateFile("Новая заметка", ".md"))),
             Menus.Item("Обновить", Icons.Refresh, () => Host?.RefreshFolder(), "F5"),
             Menus.Sep(),
             hasCanvas

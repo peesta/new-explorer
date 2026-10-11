@@ -54,6 +54,9 @@ public static class Icons
     public static readonly Geometry Loop = G("M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3");
     public static readonly Geometry Volume = G("M4 9h4l5-4v14l-5-4H4zM17 9a4 4 0 0 1 0 6");
 
+    public static readonly Geometry NewFile = G("M6 3h8l4 4v14H6zM14 3v4h4M12 11v6M9 14h6");
+    public static readonly Geometry TextFile = G("M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 15h6M9 18h4");
+
     static Geometry G(string data)
     {
         var g = Geometry.Parse(data);

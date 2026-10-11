@@ -126,7 +126,7 @@ public class FloatingFrame : Grid
 
     // While an edge is lit (hover or resize) the selection outline steps aside so the two don't blend.
     void UpdateRing() =>
-        _ring.Visibility = _selected && _glow.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
+        _ring.Visibility = _selected && !_glow.IsVisible ? Visibility.Visible : Visibility.Collapsed;
 
     public Rect Bounds
     {
@@ -208,11 +208,7 @@ public class FloatingFrame : Grid
         };
         _overrideCursor = true;
 
-        // Centre the glow on the grabbed edge, level with the cursor.
-        var c = new Point(
-            edges.HasFlag(ResizeEdges.Left) ? 0 : edges.HasFlag(ResizeEdges.Right) ? ActualWidth : Math.Clamp(p.X, 0, ActualWidth),
-            edges.HasFlag(ResizeEdges.Top) ? 0 : edges.HasFlag(ResizeEdges.Bottom) ? ActualHeight : Math.Clamp(p.Y, 0, ActualHeight));
-        _glow.Show(c);
+        _glow.Show(edges);
         UpdateRing();
     }
 

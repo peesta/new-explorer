@@ -55,6 +55,35 @@ public static class Shell
         return Native.SHFileOperation(ref op) == 0 && !op.fAnyOperationsAborted;
     }
 
+    /// <summary>Explorer rules: Ctrl copies, Shift moves, otherwise move on the same drive and copy across drives.</summary>
+    public static DragDropEffects DropEffect(string[] files, string destFolder, DragDropKeyStates keys, DragDropEffects allowed)
+    {
+        var real = files.Where(f => !SameFolder(Path.GetDirectoryName(f), destFolder) &&
+                                    !SameFolder(f, destFolder)).ToList();
+        if (real.Count == 0) return DragDropEffects.None;
+        DragDropEffects want;
+        if ((keys & DragDropKeyStates.ControlKey) != 0) want = DragDropEffects.Copy;
+        else if ((keys & DragDropKeyStates.ShiftKey) != 0) want = DragDropEffects.Move;
+        else
+        {
+            var sameDrive = real.All(f => string.Equals(Path.GetPathRoot(f), Path.GetPathRoot(destFolder), StringComparison.OrdinalIgnoreCase));
+            want = sameDrive ? DragDropEffects.Move : DragDropEffects.Copy;
+        }
+        if ((allowed & want) != 0) return want;
+        return (allowed & DragDropEffects.Copy) != 0 ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    /// <summary>Performs a file drop into <paramref name="destFolder"/>; returns the effect applied.</summary>
+    public static DragDropEffects Drop(DragEventArgs e, string destFolder, IntPtr owner)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return DragDropEffects.None;
+        var effect = DropEffect(files, destFolder, e.KeyStates, e.AllowedEffects);
+        var real = files.Where(f => !SameFolder(Path.GetDirectoryName(f), destFolder) && !SameFolder(f, destFolder)).ToList();
+        if (effect == DragDropEffects.Move) Move(real, destFolder, owner);
+        else if (effect == DragDropEffects.Copy) Copy(real, destFolder, owner);
+        return effect;
+    }
+
     public static bool SameFolder(string? a, string? b) =>
         a != null && b != null &&
         string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);

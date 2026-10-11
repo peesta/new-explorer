@@ -28,6 +28,9 @@ public partial class MainWindow : Window, IExplorerHost
     readonly FileListView _list = new();
     readonly List<FolderTab> _tabs = new();
     FolderTab _tab = new();
+    FolderTab? _justOpened;
+    readonly DispatcherTimer _tabHoverTimer = new() { Interval = TimeSpan.FromMilliseconds(550) };
+    FolderTab? _tabHoverTarget;
     readonly List<RadioButton> _sideItems = new();
     readonly DispatcherTimer _refreshTimer;
     FileSystemWatcher? _watcher;
@@ -73,6 +76,12 @@ public partial class MainWindow : Window, IExplorerHost
 
         SideColumn.Width = new GridLength(Math.Clamp(AppSettings.Current.SidebarWidth, 150, 420));
         SideGrip.Glow = SideGlow;
+        TabStrip.SizeChanged += (_, _) => FitTabs();
+        _tabHoverTimer.Tick += (_, _) =>
+        {
+            _tabHoverTimer.Stop();
+            if (_tabHoverTarget != null && _tabs.Contains(_tabHoverTarget)) SwitchTo(_tabHoverTarget);
+        };
         SideGrip.DragDelta += (_, e) =>
             SideColumn.Width = new GridLength(Math.Clamp(SideColumn.ActualWidth + e.HorizontalChange, 150, 420));
 
@@ -252,6 +261,15 @@ public partial class MainWindow : Window, IExplorerHost
         };
         ToolTipService.SetInitialShowDelay(rb, 1200);
         rb.Click += (_, _) => NavigateTo(path);
+        rb.AllowDrop = true;
+        rb.DragOver += (_, e) =>
+        {
+            e.Effects = e.Data.GetData(DataFormats.FileDrop) is string[] files
+                ? Shell.DropEffect(files, path, e.KeyStates, e.AllowedEffects)
+                : DragDropEffects.None;
+            e.Handled = true;
+        };
+        rb.Drop += (_, e) => { e.Effects = Shell.Drop(e, path, _hwnd); e.Handled = true; };
         rb.PreviewMouseDown += (_, e) =>
         {
             if (e.ChangedButton != MouseButton.Middle) return;
@@ -370,6 +388,7 @@ public partial class MainWindow : Window, IExplorerHost
         if (version != _loadVersion) return;
 
         _list.SetItems(items, keep);
+        if (!keepCanvas) _list.PlayEnter();
         if (error != null) _list.ShowMessage(error);
         if (keepCanvas) CanvasArea.SyncItems(items);
         else CanvasArea.LoadFolder(folder, items);
@@ -581,12 +600,15 @@ public partial class MainWindow : Window, IExplorerHost
         if (!Directory.Exists(path)) return;
         var tab = new FolderTab { Path = Path.GetFullPath(path) };
         _tabs.Insert(_tabs.IndexOf(_tab) + 1, tab);
+        _justOpened = tab;
         SwitchTo(tab);
     }
 
     void SwitchTo(FolderTab tab)
     {
         if (tab == _tab) return;
+        PathEdit.Visibility = Visibility.Collapsed;
+        Crumbs.Visibility = Visibility.Visible;
         CanvasArea.SaveNow();
         _tab = tab;
         Show(tab.Path);
@@ -623,6 +645,17 @@ public partial class MainWindow : Window, IExplorerHost
         WindowChrome.SetIsHitTestVisibleInChrome(add, true);
         add.Click += (_, _) => { if (_current != null) OpenInNewTab(_current); };
         TabStrip.Children.Add(add);
+        _justOpened = null;
+        FitTabs();
+    }
+
+    /// <summary>Tabs share the strip: they shrink when there are many.</summary>
+    void FitTabs()
+    {
+        var available = TabStrip.ActualWidth - 36;
+        if (available <= 0 || _tabs.Count == 0) return;
+        var width = Math.Clamp(available / _tabs.Count - 4, 64, 210);
+        foreach (var b in TabStrip.Children.OfType<Border>()) b.MaxWidth = width;
     }
 
     FrameworkElement MakeTab(FolderTab tab)
@@ -688,6 +721,40 @@ public partial class MainWindow : Window, IExplorerHost
             }
         };
         border.MouseLeftButtonDown += (_, e) => { SwitchTo(tab); e.Handled = true; };
+
+        // Files dragged onto a tab: hovering switches to it, dropping moves/copies into its folder.
+        border.AllowDrop = true;
+        border.DragEnter += (_, e) =>
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop) || tab == _tab) return;
+            _tabHoverTarget = tab;
+            _tabHoverTimer.Stop();
+            _tabHoverTimer.Start();
+        };
+        border.DragLeave += (_, _) => { if (_tabHoverTarget == tab) _tabHoverTimer.Stop(); };
+        border.DragOver += (_, e) =>
+        {
+            e.Effects = e.Data.GetData(DataFormats.FileDrop) is string[] files
+                ? Shell.DropEffect(files, tab.Path, e.KeyStates, e.AllowedEffects)
+                : DragDropEffects.None;
+            e.Handled = true;
+        };
+        border.Drop += (_, e) =>
+        {
+            _tabHoverTimer.Stop();
+            e.Effects = Shell.Drop(e, tab.Path, _hwnd);
+            e.Handled = true;
+        };
+
+        if (tab == _justOpened)
+        {
+            var scale = new ScaleTransform(0.9, 1);
+            border.RenderTransformOrigin = new Point(0, 0.5);
+            border.RenderTransform = scale;
+            var d = TimeSpan.FromMilliseconds(Anim.Short);
+            border.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, d));
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(0.9, 1, d));
+        }
         border.MouseUp += (_, e) =>
         {
             if (e.ChangedButton == MouseButton.Middle) { CloseTab(tab); e.Handled = true; }
@@ -750,12 +817,53 @@ public partial class MainWindow : Window, IExplorerHost
         try
         {
             Directory.CreateDirectory(Path.Combine(_current, name));
-            _pendingReveal = name;
-            RefreshFolder();
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Новая папка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _pendingReveal = AskNewName(name, isFolder: true);
+        RefreshFolder();
+    }
+
+    public void CreateFile(string baseName, string extension)
+    {
+        if (_current == null) return;
+        var name = baseName + extension;
+        for (var i = 2; File.Exists(Path.Combine(_current, name)) || Directory.Exists(Path.Combine(_current, name)); i++)
+            name = $"{baseName} ({i}){extension}";
+        try
+        {
+            File.WriteAllBytes(Path.Combine(_current, name), Array.Empty<byte>());
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Новый файл", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _pendingReveal = AskNewName(name, isFolder: false);
+        RefreshFolder();
+    }
+
+    /// <summary>Offers to rename a just-created item; returns its final name.</summary>
+    string AskNewName(string name, bool isFolder)
+    {
+        var dot = isFolder ? -1 : name.LastIndexOf('.');
+        var wanted = InputDialog.Ask(this, isFolder ? "Имя новой папки" : "Имя нового файла", name, dot > 0 ? dot : -1);
+        if (string.IsNullOrEmpty(wanted) || wanted == name || wanted.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return name;
+        var from = Path.Combine(_current!, name);
+        var to = Path.Combine(_current!, wanted);
+        try
+        {
+            if (isFolder) Directory.Move(from, to);
+            else File.Move(from, to);
+            return wanted;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Переименование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return name;
         }
     }
 }

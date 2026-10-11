@@ -40,4 +40,7 @@ public abstract class PreviewContent : Border
     public virtual void Unload() { }
 
     public virtual void OnRenamed(FileItem item) => Item = item;
+
+    /// <summary>Keyboard shortcut while the window is focused (e.g. Space = play/pause).</summary>
+    public virtual bool HandleKey(System.Windows.Input.Key key) => false;
 }

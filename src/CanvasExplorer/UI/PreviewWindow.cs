@@ -127,6 +127,14 @@ public sealed class PreviewWindow : FloatingFrame
 
     protected override void OnSelectedChanged() => UpdateHeader();
 
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
+        if (Body.HandleKey(e.Key)) e.Handled = true;
+        else if (e.Key == Key.Enter) { Shell.Open(Item.FullPath); e.Handled = true; }
+    }
+
     void UpdateHeader()
     {
         _zoomPanel.Visibility = IsSelected && Body.SupportsZoom ? Visibility.Visible : Visibility.Collapsed;

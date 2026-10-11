@@ -23,6 +23,14 @@ static class Menus
 
     public static Separator Sep() => new();
 
+    public static MenuItem Sub(string header, Geometry? icon, params object?[] items)
+    {
+        var mi = new MenuItem { Header = header, Icon = icon == null ? null : new Icon(icon, 13) };
+        foreach (var it in items)
+            if (it != null) mi.Items.Add(it);
+        return mi;
+    }
+
     public static ContextMenu Build(params object?[] items)
     {
         var menu = new ContextMenu();

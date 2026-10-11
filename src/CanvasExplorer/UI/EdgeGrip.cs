@@ -7,8 +7,8 @@ using System.Windows.Media;
 namespace CanvasExplorer.UI;
 
 /// <summary>
-/// Invisible vertical splitter. While hovered or dragged it lights the outline of
-/// <see cref="Glow"/> next to the cursor instead of showing a handle.
+/// Invisible vertical splitter. While hovered or dragged it lights the right side of
+/// <see cref="Glow"/> instead of showing a handle.
 /// </summary>
 public sealed class EdgeGrip : Thumb
 {
@@ -26,9 +26,7 @@ public sealed class EdgeGrip : Thumb
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (Glow == null) return;
-        var y = e.GetPosition(Glow).Y;
-        Glow.Show(new Point(Glow.ActualWidth, Math.Clamp(y, 0, Glow.ActualHeight)));
+        Glow?.Show(ResizeEdges.Right);
     }
 
     protected override void OnMouseLeave(MouseEventArgs e)

@@ -91,6 +91,13 @@ public sealed class AudioPreview : PreviewContent
     }
 
     public override FrameworkElement? HeaderExtra => _meta;
+
+    public override bool HandleKey(Key key)
+    {
+        if (key != Key.Space) return false;
+        Toggle();
+        return true;
+    }
     public override Size PreferredSize => new(460, 136);
 
     async Task LoadAsync()

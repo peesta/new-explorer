@@ -148,6 +148,7 @@ public partial class CanvasView : UserControl
             if (item == null || item.IsFolder) continue;
             var pw = AddPin(item, new Rect(p.X, p.Y, p.W, p.H), fit: false);
             if (Math.Abs(p.Zoom - 1) > 0.001) pw.Body.SetZoom(p.Zoom);
+            pw.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(Anim.Short)));
         }
     }
 
@@ -419,33 +420,16 @@ public partial class CanvasView : UserControl
 
     void Select(PreviewWindow? pw)
     {
-        if (_selected == pw)
+        if (_selected != pw)
         {
-            if (pw != null) Panel.SetZIndex(pw, ++_z);
-            return;
+            if (_selected != null) _selected.IsSelected = false;
+            _selected = pw;
+            if (pw != null) pw.IsSelected = true;
         }
-        if (_selected != null) _selected.IsSelected = false;
-        _selected = pw;
         if (pw == null) return;
-        pw.IsSelected = true;
         Panel.SetZIndex(pw, ++_z);
-    }
-
-    void BringIntoView(FloatingFrame f)
-    {
-        var b = f.Bounds;
-        var z = _scale.ScaleX;
-        var screen = new Rect(b.X * z + _pan.X, b.Y * z + _pan.Y, b.Width * z, b.Height * z);
-        var view = new Rect(Surface.RenderSize);
-        if (view.Contains(screen)) return;
-        double dx = 0, dy = 0;
-        if (screen.Right > view.Right - 20) dx = view.Right - 20 - screen.Right;
-        if (screen.Left + dx < 20) dx = 20 - screen.Left;
-        if (screen.Bottom > view.Bottom - 20) dy = view.Bottom - 20 - screen.Bottom;
-        if (screen.Top + dy < 20) dy = 20 - screen.Top;
-        _pan.X += dx;
-        _pan.Y += dy;
-        UpdateView();
+        // Keyboard goes to the window (Delete unpins it), never stays in the file list.
+        if (!pw.IsKeyboardFocusWithin) pw.Focus();
     }
 
     void Arrange()
