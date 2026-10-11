@@ -147,17 +147,4 @@ public class PlayerTests : IDisposable
         // The sections end where the player begins.
         Assert.True(AppSession.Bounds(_app.Get("SideScroll")).Bottom <= before.Top + 1);
     }
-
-    [Fact]
-    public void With_a_short_sidebar_the_player_sits_right_under_the_tags()
-    {
-        _app.SeedSettings("\"Favorites\": []");
-        WriteWav("музыка.wav");
-        PinOnCanvas("музыка.wav");
-        _app.Launch();
-        PlayInWindow("музыка.wav");
-        var mini = AppSession.Bounds(Wait.For(Mini, 4000, "плеер появился"));
-        var newTag = AppSession.Bounds(_app.Get("NewTagBtn"));
-        Assert.InRange(mini.Top - newTag.Bottom, 0, 40);
-    }
 }

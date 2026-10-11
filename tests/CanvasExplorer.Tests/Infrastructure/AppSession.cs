@@ -381,6 +381,22 @@ sealed class AppSession : IDisposable
         return ((ValuePattern)edit.GetCurrentPattern(ValuePattern.Pattern)).Current.Value;
     }
 
+    /// <summary>The colour on screen at a point (R, G, B).</summary>
+    public static (int R, int G, int B) PixelAt(Point p)
+    {
+        var dc = GetDC(IntPtr.Zero);
+        try
+        {
+            var c = GetPixel(dc, (int)p.X, (int)p.Y);
+            return ((int)(c & 0xFF), (int)((c >> 8) & 0xFF), (int)((c >> 16) & 0xFF));
+        }
+        finally { ReleaseDC(IntPtr.Zero, dc); }
+    }
+
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("gdi32.dll")] static extern uint GetPixel(IntPtr dc, int x, int y);
+
     // ---------- Win32 ----------
 
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);

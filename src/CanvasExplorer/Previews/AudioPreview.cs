@@ -49,9 +49,9 @@ public sealed class AudioPreview : PreviewContent
         _volume.Width = 64;
         _volume.Height = 16;
         _volume.VerticalAlignment = VerticalAlignment.Center;
-        // One volume for the whole app: the last level set anywhere.
-        _volume.Value = Engine.Volume;
-        _volume.ValueChanged += (_, v) => Engine.Volume = v;
+        // This file's own volume; a file not adjusted yet starts at the level set last on any file.
+        _volume.Value = Engine.VolumeOf(item.FullPath);
+        _volume.ValueChanged += (_, v) => Engine.SetVolume(Item.FullPath, v);
 
         var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(startBtn);
@@ -89,6 +89,7 @@ public sealed class AudioPreview : PreviewContent
 
         Engine.Changed += OnEngine;
         Engine.Tick += OnTick;
+        Engine.VolumeChanged += OnVolume;
         _ = LoadAsync();
         UpdateView();
     }
@@ -154,6 +155,14 @@ public sealed class AudioPreview : PreviewContent
 
     void OnEngine(object? sender, EventArgs e) => UpdateView();
 
+    void OnVolume(object? sender, string path)
+    {
+        // Only this file's volume (changed here or in the sidebar player), never another file's.
+        if (!string.Equals(path, Item.FullPath, StringComparison.OrdinalIgnoreCase)) return;
+        var v = Engine.VolumeOf(path);
+        if (Math.Abs(_volume.Value - v) > 0.0005) _volume.Value = v;
+    }
+
     void OnTick(object? sender, EventArgs e)
     {
         if (IsCurrent) UpdatePosition();
@@ -166,7 +175,6 @@ public sealed class AudioPreview : PreviewContent
         _playBtn.ToolTip = playing ? "Пауза (пробел)" : "Воспроизвести (пробел)";
         System.Windows.Automation.AutomationProperties.SetName(_playBtn, playing ? "Пауза" : "Воспроизвести");
         _loopBtn.SetResourceReference(Control.ForegroundProperty, Engine.Loop ? "AccentBrush" : "SubBrush");
-        if (Math.Abs(_volume.Value - Engine.Volume) > 0.0005) _volume.Value = Engine.Volume;
         UpdatePosition();
     }
 
@@ -199,6 +207,7 @@ public sealed class AudioPreview : PreviewContent
         _unloaded = true;
         Engine.Changed -= OnEngine;
         Engine.Tick -= OnTick;
+        Engine.VolumeChanged -= OnVolume;
     }
 }
 

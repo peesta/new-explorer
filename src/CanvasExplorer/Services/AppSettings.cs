@@ -23,6 +23,14 @@ public sealed class AppSettings
     public List<Favorite>? Favorites { get; set; }
     /// <summary>Volume of the audio player (0…1); the last level set is used for every new player.</summary>
     public double AudioVolume { get; set; } = 0.8;
+    /// <summary>Last volume set on a video (new videos start at it).</summary>
+    public double VideoVolume { get; set; } = 0.8;
+    /// <summary>Players at the bottom of the sidebar, top to bottom ("audio", "video").</summary>
+    public List<string> PlayerOrder { get; set; } = new() { "video", "audio" };
+    public double AudioPlayerHeight { get; set; } = 134;
+    public double VideoPlayerHeight { get; set; } = 230;
+    /// <summary>The sidebar sits right of the canvas (as tall as the canvas) instead of left.</summary>
+    public bool SidebarRight { get; set; }
     /// <summary>Size of tiles in the grid view (Ctrl + wheel), 1 = normal.</summary>
     public double TileScale { get; set; } = 1;
     public string? LastFolder { get; set; }

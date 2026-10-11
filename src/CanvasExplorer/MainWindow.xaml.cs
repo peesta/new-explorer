@@ -83,7 +83,13 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
         PathEdit.KeyDown += OnPathKey;
         PathEdit.LostKeyboardFocus += (_, _) => EndPathEdit();
 
+        _rootGrid = (Grid)SideHost.Parent;
         SideColumn.Width = new GridLength(Math.Clamp(AppSettings.Current.SidebarWidth, 150, 420));
+        if (AppSettings.Current.SidebarRight) PlaceSidebar(right: true);
+        SideBorder.PreviewMouseLeftButtonDown += OnSideDown;
+        SideBorder.PreviewMouseMove += OnSideMove;
+        SideBorder.PreviewMouseLeftButtonUp += (_, e) => { if (EndSideDrag(apply: true)) e.Handled = true; };
+        SideBorder.LostMouseCapture += (_, _) => EndSideDrag(apply: false);
         SideGrip.Glow = SideGlow;
         TabStrip.SizeChanged += (_, _) => FitTabs();
         _tabHoverTimer.Tick += (_, _) =>
@@ -92,7 +98,7 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
             if (_tabHoverTarget != null && _tabs.Contains(_tabHoverTarget)) SwitchTo(_tabHoverTarget);
         };
         SideGrip.DragDelta += (_, e) =>
-            SideColumn.Width = new GridLength(Math.Clamp(SideColumn.ActualWidth + e.HorizontalChange, 150, 420));
+            SidebarWidth = SidebarWidth + (_sideRight ? -e.HorizontalChange : e.HorizontalChange);
         SideGrip.DragCompleted += (_, _) => ScheduleSettingsSave();
         LocationChanged += (_, _) => ScheduleSettingsSave();
         SizeChanged += (_, _) => ScheduleSettingsSave();
@@ -113,7 +119,9 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
         RestoreWindowBounds();
         _sidebar = new Sidebar(SidePanel, SideBorder, this);
         _sidebar.Build();
-        SideStack.Children.Add(new MiniPlayer(ShowInFolder));
+        SideStack.Children.Add(new PlayerDock(
+            new SidebarPlayer(AudioEngine.Current, video: false, ShowInFolder),
+            new SidebarPlayer(VideoEngine.Current, video: true, ShowInFolder)));
         _drivesTimer.Tick += (_, _) => { _drivesTimer.Stop(); _sidebar.Build(); };
         TagStore.Current.Changed += (_, _) => Dispatcher.BeginInvoke(OnTagsChanged);
     }
@@ -216,6 +224,7 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
         CanvasArea.SaveNow();
         CanvasArea.FlushPins();
         AudioEngine.Current.Close();
+        VideoEngine.Current.Close();
         _settingsTimer.Stop();
         SaveSettings();
         _watcher?.Dispose();
@@ -232,7 +241,8 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
     void SaveSettings()
     {
         var s = AppSettings.Current;
-        s.SidebarWidth = SideColumn.ActualWidth;
+        s.SidebarWidth = SidebarWidth;
+        s.SidebarRight = _sideRight;
         s.Maximized = WindowState == WindowState.Maximized;
         var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         s.WinLeft = r.Left;
@@ -243,6 +253,112 @@ public partial class MainWindow : Window, IExplorerHost, ISidebarHost
         s.Tabs = _tabs.Select(t => t.Path).ToList();
         s.ActiveTab = _tabs.IndexOf(_tab);
         s.Save();
+    }
+
+    // ---------- sidebar side: left of everything, or right of the canvas ----------
+
+    readonly Grid _rootGrid;
+    bool _sideRight;
+    Point? _sideDragFrom;
+    bool _sideDragging;
+
+    double SidebarWidth
+    {
+        get => (_sideRight ? RightColumn : SideColumn).Width.Value;
+        set => (_sideRight ? RightColumn : SideColumn).Width = new GridLength(Math.Clamp(value, 150, 420));
+    }
+
+    /// <summary>
+    /// Left: full window height, left of tabs and toolbar. Right: right of the canvas and exactly as tall as it.
+    /// </summary>
+    void PlaceSidebar(bool right)
+    {
+        var width = SidebarWidth;
+        ((Panel)SideHost.Parent).Children.Remove(SideHost);
+        ((Panel)SideGrip.Parent).Children.Remove(SideGrip);
+        _sideRight = right;
+        if (right)
+        {
+            Grid.SetColumn(SideHost, 2);
+            Grid.SetColumn(SideGrip, 1);
+            SideGrip.Margin = new Thickness(0, 0, -4, 0);
+            SideGrip.Side = ResizeEdges.Left;
+            Body.Children.Add(SideHost);
+            Body.Children.Add(SideGrip);
+            SideColumn.Width = new GridLength(0);
+            SideGap.Width = new GridLength(0);
+            RightGap.Width = new GridLength(6);
+        }
+        else
+        {
+            Grid.SetColumn(SideHost, 0);
+            Grid.SetColumn(SideGrip, 1);
+            SideGrip.Margin = new Thickness(-4, 0, 0, 0);
+            SideGrip.Side = ResizeEdges.Right;
+            _rootGrid.Children.Insert(0, SideHost);
+            _rootGrid.Children.Insert(1, SideGrip);
+            RightColumn.Width = new GridLength(0);
+            RightGap.Width = new GridLength(0);
+            SideGap.Width = new GridLength(6);
+        }
+        SidebarWidth = width;
+    }
+
+    // Dragging the panel by its empty space or a section title moves it to the other side.
+    void OnSideDown(object sender, MouseButtonEventArgs e)
+    {
+        for (var d = e.OriginalSource as DependencyObject; d != null && d != SideBorder; d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+            if (d is System.Windows.Controls.Primitives.ButtonBase or System.Windows.Controls.Primitives.ScrollBar
+                or System.Windows.Controls.Primitives.TextBoxBase or SidebarPlayer)
+                return;
+        _sideDragFrom = e.GetPosition(this);
+    }
+
+    void OnSideMove(object sender, MouseEventArgs e)
+    {
+        if (_sideDragFrom is not { } from) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _sideDragFrom = null;
+            return;
+        }
+        var p = e.GetPosition(this);
+        if (!_sideDragging)
+        {
+            if (Math.Abs(p.X - from.X) < 12) return;
+            _sideDragging = true;
+            SideBorder.CaptureMouse();
+            SideHost.Opacity = 0.6;
+        }
+        ShowDockHint(p.X > _rootGrid.ActualWidth / 2);
+        e.Handled = true;
+    }
+
+    void ShowDockHint(bool right)
+    {
+        DockHint.Width = SidebarWidth;
+        DockHint.HorizontalAlignment = right ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        // On the right the panel is as tall as the canvas.
+        DockHint.Margin = right ? new Thickness(0, Body.TranslatePoint(new Point(), _rootGrid).Y, 0, 0) : new Thickness(0);
+        DockHint.Tag = right;
+        DockHint.Visibility = Visibility.Visible;
+    }
+
+    bool EndSideDrag(bool apply)
+    {
+        _sideDragFrom = null;
+        if (!_sideDragging) return false;
+        _sideDragging = false;
+        var right = DockHint.Tag is true;
+        DockHint.Visibility = Visibility.Collapsed;
+        SideHost.Opacity = 1;
+        if (SideBorder.IsMouseCaptured) SideBorder.ReleaseMouseCapture();
+        if (apply && right != _sideRight)
+        {
+            PlaceSidebar(right);
+            ScheduleSettingsSave();
+        }
+        return true;
     }
 
     // ---------- locations: folders and tag views ----------

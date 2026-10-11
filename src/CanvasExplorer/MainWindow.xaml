@@ -15,12 +15,12 @@
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="SideColumn" Width="196"/>
-                <ColumnDefinition Width="6"/>
+                <ColumnDefinition x:Name="SideGap" Width="6"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
             <!-- Sidebar (resizable horizontally; its right outline lights up while resizing) -->
-            <Grid WindowChrome.IsHitTestVisibleInChrome="True">
+            <Grid x:Name="SideHost" WindowChrome.IsHitTestVisibleInChrome="True">
                 <Border x:Name="SideBorder" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="8">
                     <!-- Favorites, drives and tags scroll; the player under them stays in place -->
                     <ui:SidebarStack x:Name="SideStack">
@@ -32,6 +32,10 @@
                 <ui:EdgeGlow x:Name="SideGlow" CornerRadius="8"/>
             </Grid>
             <ui:EdgeGrip x:Name="SideGrip" Grid.Column="1" Margin="-4,0,0,0" WindowChrome.IsHitTestVisibleInChrome="True"/>
+
+            <!-- While the sidebar is dragged: where it will land -->
+            <Border x:Name="DockHint" Grid.ColumnSpan="3" Width="196" HorizontalAlignment="Left" Visibility="Collapsed" IsHitTestVisible="False"
+                    CornerRadius="8" BorderThickness="2" BorderBrush="{DynamicResource AccentBrush}" Background="{DynamicResource AccentSoftBrush}" Panel.ZIndex="100"/>
 
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
@@ -110,7 +114,15 @@
                     </Border>
                 </Grid>
 
-                <ui:CanvasView x:Name="CanvasArea" Grid.Row="4"/>
+                <!-- The canvas; the sidebar moves in here (right of it, as tall as it) when dragged to the right -->
+                <Grid x:Name="Body" Grid.Row="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition x:Name="RightGap" Width="0"/>
+                        <ColumnDefinition x:Name="RightColumn" Width="0"/>
+                    </Grid.ColumnDefinitions>
+                    <ui:CanvasView x:Name="CanvasArea"/>
+                </Grid>
             </Grid>
         </Grid>
     </Border>

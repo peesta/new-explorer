@@ -6,13 +6,18 @@ namespace CanvasExplorer.Services;
 
 /// <summary>
 /// The one audio player of the app. It belongs to no window: playback goes on when the pinned window that started
-/// it is unpinned, its folder is left or its tab is closed. Windows on the canvas and the mini player in the sidebar
-/// are views of it. Volume and repeat are shared by all of them (the volume is also remembered in the settings).
-/// Use from the UI thread.
+/// it is unpinned, its folder is left or its tab is closed. Windows on the canvas and the audio player in the sidebar
+/// are views of it. Each file keeps its own volume; repeat is shared. Use from the UI thread.
 /// </summary>
-public sealed class AudioEngine
+public sealed class AudioEngine : IMediaEngine
 {
     public static AudioEngine Current { get; } = new();
+
+    readonly VolumeMemory _volumes = new(() => AppSettings.Current.AudioVolume, v =>
+    {
+        AppSettings.Current.AudioVolume = v;
+        AppSettings.ScheduleSave();
+    });
 
     WaveStream? _reader;
     WaveOutEvent? _output;
@@ -24,6 +29,7 @@ public sealed class AudioEngine
     public event EventHandler? Changed;
     /// <summary>Raised ~25 times a second while playing (position moved).</summary>
     public event EventHandler? Tick;
+    public event EventHandler<string>? VolumeChanged;
 
     /// <summary>The loaded file (playing or paused), or null when the player is closed.</summary>
     public string? Path { get; private set; }
@@ -39,19 +45,14 @@ public sealed class AudioEngine
         set { if (_loop != value) { _loop = value; Raise(); } }
     }
 
-    /// <summary>0…1; the last level set anywhere, also for players opened later.</summary>
-    public double Volume
+    public double VolumeOf(string path) => _volumes.Of(path);
+
+    /// <summary>Volume of one file (only that file); also the level files not adjusted yet will start at.</summary>
+    public void SetVolume(string path, double volume)
     {
-        get => Math.Clamp(AppSettings.Current.AudioVolume, 0, 1);
-        set
-        {
-            var v = Math.Round(Math.Clamp(value, 0, 1), 3);
-            if (Math.Abs(v - AppSettings.Current.AudioVolume) < 0.0005) return;
-            AppSettings.Current.AudioVolume = v;
-            AppSettings.ScheduleSave();
-            if (_output != null) _output.Volume = (float)v;
-            Raise();
-        }
+        if (!_volumes.Set(path, volume)) return;
+        if (IsCurrent(path) && _output != null) _output.Volume = (float)VolumeOf(path);
+        VolumeChanged?.Invoke(this, path);
     }
 
     /// <summary>Starts <paramref name="path"/> at <paramref name="start"/> (the current track just resumes). False if it can't be played.</summary>
@@ -65,7 +66,7 @@ public sealed class AudioEngine
                 _reader = new MediaFoundationReader(path);
                 _output = new WaveOutEvent { DesiredLatency = 120 };
                 _output.Init(_reader);
-                _output.Volume = (float)Volume;
+                _output.Volume = (float)VolumeOf(path);
                 // Raised on NAudio's thread; a late event of a replaced output must not touch the new track.
                 var ui = Dispatcher.CurrentDispatcher;
                 var output = _output;
@@ -81,6 +82,8 @@ public sealed class AudioEngine
         }
         if (_reader == null || _output == null) return false;
         if (_reader.CurrentTime >= _reader.TotalTime - TimeSpan.FromMilliseconds(50)) _reader.CurrentTime = TimeSpan.Zero;
+        // One sound at a time: a playing video pauses.
+        VideoEngine.Current.Pause();
         _output.Play();
         StartTick();
         Raise();

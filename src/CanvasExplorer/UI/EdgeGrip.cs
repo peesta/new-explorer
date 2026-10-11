@@ -20,13 +20,16 @@ public sealed class EdgeGrip : Thumb
         Template = new ControlTemplate(typeof(Thumb)) { VisualTree = root };
     }
 
-    /// <summary>Outline overlay of the panel this grip resizes (its right edge gets lit).</summary>
+    /// <summary>Outline overlay of the panel this grip resizes (its edge on <see cref="Side"/> gets lit).</summary>
     public EdgeGlow? Glow { get; set; }
+
+    /// <summary>Which edge of the panel the grip is on (right when the panel is on the left, and vice versa).</summary>
+    public ResizeEdges Side { get; set; } = ResizeEdges.Right;
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        Glow?.Show(ResizeEdges.Right);
+        Glow?.Show(Side);
     }
 
     protected override void OnMouseLeave(MouseEventArgs e)

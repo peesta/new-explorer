@@ -16,6 +16,7 @@ public static class PreviewFactory
         FileKind.Text or FileKind.Code => new TextPreview(item),
         FileKind.Audio when PlayableAudio.Contains(item.Ext) => new AudioPreview(item),
         FileKind.Pdf => new PdfPreview(item),
+        FileKind.Video => new VideoPreview(item),
         _ => new GenericPreview(item),
     };
 }
