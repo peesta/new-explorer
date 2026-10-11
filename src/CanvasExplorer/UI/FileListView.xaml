@@ -1,0 +1,182 @@
+<UserControl x:Class="CanvasExplorer.UI.FileListView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:CanvasExplorer.UI">
+    <UserControl.Resources>
+        <ItemsPanelTemplate x:Key="StackTpl">
+            <VirtualizingStackPanel/>
+        </ItemsPanelTemplate>
+        <ItemsPanelTemplate x:Key="WrapTpl">
+            <WrapPanel Margin="4,4,0,0"/>
+        </ItemsPanelTemplate>
+
+        <!-- Large rows: two lines -->
+        <DataTemplate x:Key="RowL">
+            <Grid Height="44" ToolTip="{Binding Tip}" ToolTipService.InitialShowDelay="900">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="64"/>
+                </Grid.ColumnDefinitions>
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="32" Height="32" CornerRadius="6" Background="{Binding ChipBg}" Tag="grab" ToolTip="…" ToolTipOpening="Chip_ToolTipOpening" ToolTipService.InitialShowDelay="350" ToolTipService.Placement="Right" ToolTipService.HorizontalOffset="8">
+                        <Grid>
+                            <TextBlock Text="{Binding Ext}" FontSize="9" FontWeight="Bold" Foreground="{Binding ChipFg}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ExtVisibility}"/>
+                            <ui:Icon Data="{x:Static ui:Icons.Folder}" Size="15" Foreground="{Binding ChipFg}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding FolderVisibility}"/>
+                        </Grid>
+                    </Border>
+                    <ui:Icon DockPanel.Dock="Right" Data="{x:Static ui:Icons.Pin}" Size="11" StrokeWidth="2.4" Margin="6,0,4,0"
+                             Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"
+                             Visibility="{Binding IsPinned, Converter={StaticResource BoolVis}}"/>
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" HorizontalAlignment="Left" Tag="grab"/>
+                        <TextBlock Text="{Binding KindText}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock Grid.Column="1" Text="{Binding DateText}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Medium rows -->
+        <DataTemplate x:Key="RowM">
+            <Grid Height="30" ToolTip="{Binding Tip}" ToolTipService.InitialShowDelay="900">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="64"/>
+                </Grid.ColumnDefinitions>
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="30" Height="17" CornerRadius="3" Background="{Binding ChipBg}" Tag="grab" ToolTip="…" ToolTipOpening="Chip_ToolTipOpening" ToolTipService.InitialShowDelay="350" ToolTipService.Placement="Right" ToolTipService.HorizontalOffset="8">
+                        <Grid>
+                            <TextBlock Text="{Binding Ext}" FontSize="8.5" FontWeight="Bold" Foreground="{Binding ChipFg}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ExtVisibility}"/>
+                            <ui:Icon Data="{x:Static ui:Icons.Folder}" Size="11" StrokeWidth="2" Foreground="{Binding ChipFg}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding FolderVisibility}"/>
+                        </Grid>
+                    </Border>
+                    <ui:Icon DockPanel.Dock="Right" Data="{x:Static ui:Icons.Pin}" Size="11" StrokeWidth="2.4" Margin="6,0,4,0"
+                             Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"
+                             Visibility="{Binding IsPinned, Converter={StaticResource BoolVis}}"/>
+                    <TextBlock Text="{Binding Name}" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" HorizontalAlignment="Left" Tag="grab"/>
+                </DockPanel>
+                <TextBlock Grid.Column="1" Text="{Binding DateText}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Small rows -->
+        <DataTemplate x:Key="RowS">
+            <Grid Height="23" ToolTip="{Binding Tip}" ToolTipService.InitialShowDelay="900">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="64"/>
+                </Grid.ColumnDefinitions>
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="26" Height="14" CornerRadius="3" Background="{Binding ChipBg}" Tag="grab" ToolTip="…" ToolTipOpening="Chip_ToolTipOpening" ToolTipService.InitialShowDelay="350" ToolTipService.Placement="Right" ToolTipService.HorizontalOffset="8">
+                        <Grid>
+                            <TextBlock Text="{Binding Ext}" FontSize="7.5" FontWeight="Bold" Foreground="{Binding ChipFg}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ExtVisibility}"/>
+                            <ui:Icon Data="{x:Static ui:Icons.Folder}" Size="10" StrokeWidth="2.2" Foreground="{Binding ChipFg}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding FolderVisibility}"/>
+                        </Grid>
+                    </Border>
+                    <ui:Icon DockPanel.Dock="Right" Data="{x:Static ui:Icons.Pin}" Size="10" StrokeWidth="2.4" Margin="6,0,4,0"
+                             Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"
+                             Visibility="{Binding IsPinned, Converter={StaticResource BoolVis}}"/>
+                    <TextBlock Text="{Binding Name}" FontSize="12" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" HorizontalAlignment="Left" Tag="grab"/>
+                </DockPanel>
+                <TextBlock Grid.Column="1" Text="{Binding DateText}" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Grid tiles -->
+        <DataTemplate x:Key="Tile">
+            <Grid Width="84" Height="92" ToolTip="{Binding Tip}" ToolTipService.InitialShowDelay="900">
+                <StackPanel Margin="0,8,0,0" Tag="grab" Background="Transparent">
+                    <Border Width="44" Height="44" CornerRadius="6" Background="{Binding ChipBg}" Tag="grab" ToolTip="…" ToolTipOpening="Chip_ToolTipOpening" ToolTipService.InitialShowDelay="350" ToolTipService.Placement="Right" ToolTipService.HorizontalOffset="8">
+                        <Grid>
+                            <TextBlock Text="{Binding Ext}" FontSize="11" FontWeight="Bold" Foreground="{Binding ChipFg}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ExtVisibility}"/>
+                            <ui:Icon Data="{x:Static ui:Icons.Folder}" Size="20" Foreground="{Binding ChipFg}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding FolderVisibility}"/>
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{Binding Name}" FontSize="11.5" TextAlignment="Center" TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis" MaxHeight="31" Margin="0,6,0,0"/>
+                </StackPanel>
+                <ui:Icon Data="{x:Static ui:Icons.Pin}" Size="11" StrokeWidth="2.4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,0,0"
+                         Foreground="{DynamicResource AccentBrush}" Visibility="{Binding IsPinned, Converter={StaticResource BoolVis}}"/>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="26"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="32"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header strip: also the handle for moving the list window -->
+            <Border x:Name="Header" Background="Transparent" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1"
+                    ui:FloatingFrame.IsDragHandle="True">
+                <Grid x:Name="HeaderColumns" Margin="14,0,14,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="72"/>
+                        <ColumnDefinition Width="64"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Имя" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Изменён" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    <TextBlock Grid.Column="2" Text="Размер" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                </Grid>
+            </Border>
+
+            <ListBox x:Name="List" Grid.Row="1" Style="{StaticResource FlatList}" ItemContainerStyle="{StaticResource FileRow}"
+                     SelectionMode="Extended" Margin="6,4,6,0" AllowDrop="True"/>
+
+            <Canvas x:Name="MarqueeLayer" Grid.Row="1" Margin="6,4,6,0" IsHitTestVisible="False" ClipToBounds="True">
+                <Rectangle x:Name="Marquee" Visibility="Collapsed" Fill="{DynamicResource AccentSoftBrush}"
+                           Stroke="{DynamicResource AccentBrush}" StrokeThickness="1" RadiusX="2" RadiusY="2"/>
+            </Canvas>
+
+            <TextBlock x:Name="Message" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="20"/>
+
+            <Border Grid.Row="2" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0">
+                <DockPanel Margin="14,0,6,0">
+                    <Border DockPanel.Dock="Right" Background="{StaticResource DividerBrush}" CornerRadius="5" Padding="2" VerticalAlignment="Center" Margin="6,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="ViewList" GroupName="View" Style="{StaticResource SegButton}" ToolTip="Список">
+                                <ui:Icon Data="{x:Static ui:Icons.List}" Size="14" StrokeWidth="2"/>
+                            </RadioButton>
+                            <RadioButton x:Name="ViewGrid" GroupName="View" Style="{StaticResource SegButton}" ToolTip="Сетка">
+                                <ui:Icon Data="{x:Static ui:Icons.Grid}" Size="13" StrokeWidth="2"/>
+                            </RadioButton>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="DensityGroup" DockPanel.Dock="Right" Background="{StaticResource DividerBrush}" CornerRadius="5" Padding="2" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="DensityL" GroupName="Density" Style="{StaticResource SegButton}" ToolTip="Крупные строки">
+                                <ui:Icon Data="{x:Static ui:Icons.DensityLarge}" Size="13" StrokeWidth="2"/>
+                            </RadioButton>
+                            <RadioButton x:Name="DensityM" GroupName="Density" Style="{StaticResource SegButton}" ToolTip="Обычные строки">
+                                <ui:Icon Data="{x:Static ui:Icons.DensityMedium}" Size="13" StrokeWidth="2"/>
+                            </RadioButton>
+                            <RadioButton x:Name="DensityS" GroupName="Density" Style="{StaticResource SegButton}" ToolTip="Компактные строки">
+                                <ui:Icon Data="{x:Static ui:Icons.DensitySmall}" Size="13" StrokeWidth="2"/>
+                            </RadioButton>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock x:Name="CountText" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

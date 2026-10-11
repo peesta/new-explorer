@@ -1,0 +1,114 @@
+<Window x:Class="CanvasExplorer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:CanvasExplorer.UI"
+        Title="Проводник" Width="1280" Height="800" MinWidth="760" MinHeight="440"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="{StaticResource UiFont}" FontSize="12.5"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        WindowStartupLocation="CenterScreen">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="38" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Border x:Name="RootBorder" Padding="6">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="SideColumn" Width="196"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar (resizable horizontally; its right outline lights up while resizing) -->
+            <Grid WindowChrome.IsHitTestVisibleInChrome="True">
+                <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="8">
+                    <ScrollViewer Style="{StaticResource OverlayScroll}" VerticalScrollBarVisibility="Auto" Padding="6,10,6,10">
+                        <StackPanel x:Name="SidePanel"/>
+                    </ScrollViewer>
+                </Border>
+                <ui:EdgeGlow x:Name="SideGlow" CornerRadius="8"/>
+            </Grid>
+            <ui:EdgeGrip x:Name="SideGrip" Grid.Column="1" Margin="-4,0,0,0" WindowChrome.IsHitTestVisibleInChrome="True"/>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="32"/>
+                    <RowDefinition Height="6"/>
+                    <RowDefinition Height="32"/>
+                    <RowDefinition Height="6"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Tabs + window buttons (empty space drags the window) -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel x:Name="TabStrip" Orientation="Horizontal" VerticalAlignment="Center" ClipToBounds="True"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                        <Button x:Name="MinBtn" Style="{StaticResource CaptionButton}" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Свернуть">
+                            <ui:Icon Data="{x:Static ui:Icons.Minus}" Size="13" StrokeWidth="1.6"/>
+                        </Button>
+                        <Button x:Name="MaxBtn" Style="{StaticResource CaptionButton}" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Развернуть">
+                            <ui:Icon x:Name="MaxIcon" Data="{x:Static ui:Icons.Maximize}" Size="12" StrokeWidth="1.7"/>
+                        </Button>
+                        <Button x:Name="CloseBtn" Style="{StaticResource CloseCaptionButton}" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Закрыть">
+                            <ui:Icon Data="{x:Static ui:Icons.Close}" Size="13" StrokeWidth="1.6"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Toolbar -->
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="2">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="BackBtn" Style="{StaticResource IconButton}" ToolTip="Назад (Alt+←)">
+                                <ui:Icon Data="{x:Static ui:Icons.Back}" Size="15" StrokeWidth="2"/>
+                            </Button>
+                            <Button x:Name="ForwardBtn" Style="{StaticResource IconButton}" ToolTip="Вперёд (Alt+→)">
+                                <ui:Icon Data="{x:Static ui:Icons.Forward}" Size="15" StrokeWidth="2"/>
+                            </Button>
+                            <Button x:Name="UpBtn" Style="{StaticResource IconButton}" ToolTip="Вверх (Alt+↑)">
+                                <ui:Icon Data="{x:Static ui:Icons.Up}" Size="15" StrokeWidth="2"/>
+                            </Button>
+                            <Button x:Name="RefreshBtn" Style="{StaticResource IconButton}" ToolTip="Обновить (F5)">
+                                <ui:Icon Data="{x:Static ui:Icons.Refresh}" Size="14" StrokeWidth="2"/>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Path: click a segment to go there, click empty space to type a path -->
+                    <Border x:Name="PathBar" Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6"
+                            Padding="6,0" Cursor="IBeam">
+                        <Grid>
+                            <StackPanel x:Name="Crumbs" Orientation="Horizontal" VerticalAlignment="Center" Cursor="Arrow" HorizontalAlignment="Left"/>
+                            <TextBox x:Name="PathEdit" Style="{StaticResource FieldBox}" Visibility="Collapsed" Padding="4,0"/>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6"
+                            Width="220" Padding="8,0">
+                        <DockPanel>
+                            <ui:Icon DockPanel.Dock="Left" Data="{x:Static ui:Icons.Search}" Size="13" StrokeWidth="2.2" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <Grid>
+                                <TextBlock x:Name="SearchHint" Text="Поиск в папке" Foreground="{StaticResource FaintBrush}" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                <TextBox x:Name="SearchBox" Style="{StaticResource FieldBox}"/>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <ui:CanvasView x:Name="CanvasArea" Grid.Row="4"/>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>
