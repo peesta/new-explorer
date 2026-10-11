@@ -9,15 +9,21 @@ using CanvasExplorer.Services;
 
 namespace CanvasExplorer.Previews;
 
-/// <summary>Editable text file. Click and type; changes are saved automatically in the file's own encoding.</summary>
+/// <summary>
+/// Editable text file. Click and type; changes are saved automatically in the file's own encoding.
+/// Edits made by other programs are picked up; a conflict with unsaved edits is asked about, never overwritten silently.
+/// </summary>
 public sealed class TextPreview : PreviewContent
 {
     const double BaseFontSize = 12.5;
 
     readonly TextBox _box;
     readonly DispatcherTimer _saveTimer;
+    readonly DispatcherTimer _checkTimer;
     Encoding _encoding = new UTF8Encoding(false);
+    FileStamp _stamp;
     bool _loading = true;
+    bool _resolving;
     bool _dirty;
     double _zoom = 1;
 
@@ -54,8 +60,11 @@ public sealed class TextPreview : PreviewContent
         _box.LostKeyboardFocus += (_, _) => { if (_dirty) Save(); };
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); Save(); };
+        // File change notifications come in bursts; look once they settle.
+        _checkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _checkTimer.Tick += (_, _) => { _checkTimer.Stop(); CheckDisk(); };
         Child = _box;
-        _ = LoadAsync();
+        _ = LoadAsync(reload: false);
     }
 
     public override bool SupportsZoom => true;
@@ -70,25 +79,60 @@ public sealed class TextPreview : PreviewContent
         RaiseState();
     }
 
-    async Task LoadAsync()
+    async Task LoadAsync(bool reload)
     {
+        _loading = true;
         try
         {
             var path = Item.FullPath;
-            var (text, encoding, truncated) = await Task.Run(() => TextFile.Read(path));
+            var (text, encoding, truncated, stamp) = await Task.Run(() =>
+            {
+                var s = FileStamp.Of(path);
+                var (t, enc, cut) = TextFile.Read(path);
+                return (t, enc, cut, s);
+            });
             _encoding = encoding;
+            _stamp = stamp;
+            // A reload keeps the caret and the scroll position where the reader left them.
+            var caret = _box.CaretIndex;
+            var offset = _box.VerticalOffset;
             _box.Text = text;
+            if (reload)
+            {
+                _box.CaretIndex = Math.Min(caret, text.Length);
+                _box.ScrollToVerticalOffset(offset);
+            }
             _box.IsReadOnly = truncated;
-            if (truncated) _box.ToolTip = "Файл слишком большой: показано начало, редактирование отключено";
+            _box.ToolTip = truncated ? "Файл слишком большой: показано начало, редактирование отключено" : null;
         }
         catch (Exception ex)
         {
-            _box.Text = "Не удалось открыть файл: " + ex.Message;
+            if (!reload)
+            {
+                _box.Text = "Не удалось открыть файл: " + ex.Message;
+                _box.IsReadOnly = true;
+            }
         }
         finally
         {
             _loading = false;
         }
+    }
+
+    public override void OnFileChanged()
+    {
+        _checkTimer.Stop();
+        _checkTimer.Start();
+    }
+
+    /// <summary>Re-reads the file if another program changed it; with unsaved edits the save asks first.</summary>
+    void CheckDisk()
+    {
+        if (_loading || _resolving) return;
+        var now = FileStamp.Of(Item.FullPath);
+        if (!now.Exists || now == _stamp) return;
+        if (_dirty) Save();
+        else _ = LoadAsync(reload: true);
     }
 
     void SetDirty(bool value)
@@ -100,10 +144,29 @@ public sealed class TextPreview : PreviewContent
 
     void Save()
     {
-        if (!_dirty || _box.IsReadOnly) return;
+        if (!_dirty || _box.IsReadOnly || _loading || _resolving) return;
+        _saveTimer.Stop();
+        var path = Item.FullPath;
+        var now = FileStamp.Of(path);
+        // Deleted meanwhile: writing would bring the file back.
+        if (!now.Exists) return;
+        if (now != _stamp)
+        {
+            _resolving = true;
+            var keep = FileStamp.AskKeepEdits(Item.Name);
+            _resolving = false;
+            if (!keep)
+            {
+                SetDirty(false);
+                _ = LoadAsync(reload: true);
+                return;
+            }
+        }
         try
         {
-            TextFile.Write(Item.FullPath, _box.Text, _encoding);
+            TextFile.Write(path, _box.Text, _encoding);
+            _stamp = FileStamp.Of(path);
+            _box.ToolTip = null;
             SetDirty(false);
         }
         catch (Exception ex)
@@ -114,6 +177,7 @@ public sealed class TextPreview : PreviewContent
 
     public override void Unload()
     {
+        _checkTimer.Stop();
         _saveTimer.Stop();
         Save();
     }

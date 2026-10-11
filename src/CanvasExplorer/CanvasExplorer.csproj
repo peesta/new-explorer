@@ -22,4 +22,8 @@
     <Resource Include="Fonts\*.ttf" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CanvasExplorer.Tests" />
+  </ItemGroup>
+
 </Project>

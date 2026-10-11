@@ -6,9 +6,10 @@
         <Grid x:Name="Surface" AllowDrop="True" Focusable="True" FocusVisualStyle="{x:Null}">
             <Canvas x:Name="World"/>
 
-            <!-- Zoom controls: hidden until the pointer reaches this corner -->
-            <Border x:Name="CornerZone" Width="250" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="Transparent">
-                <Border x:Name="ZoomPanel" Opacity="0" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,10,10"
+            <!-- Zoom controls: hidden until the pointer reaches this corner over empty canvas.
+                 The zone takes no input itself (no background), so whatever lies under it stays clickable. -->
+            <Border x:Name="CornerZone" Width="250" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                <Border x:Name="ZoomPanel" Opacity="0" IsHitTestVisible="False" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,10,10"
                         Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="2">
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="ZoomOutBtn" Style="{StaticResource IconButton}" ToolTip="Уменьшить (Ctrl + колесо)">

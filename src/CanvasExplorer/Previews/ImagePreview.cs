@@ -57,9 +57,12 @@ public sealed class ImagePreview : PreviewContent
         }
         catch
         {
-            _status.Text = "Не удалось открыть изображение";
+            // A failed re-read (file still being written) keeps the picture already shown.
+            if (_image.Source == null) _status.Text = "Не удалось открыть изображение";
         }
     }
+
+    public override void OnFileChanged() => _ = LoadAsync();
 
     static BitmapSource Decode(string path)
     {

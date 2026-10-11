@@ -40,6 +40,8 @@
         <Setter Property="Height" Value="24"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Focusable" Value="False"/>
+        <!-- Icon-only buttons are named by their tooltip for screen readers and UI automation -->
+        <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -64,6 +66,8 @@
 
     <Style x:Key="TextButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
         <Setter Property="Width" Value="NaN"/>
+        <!-- Named by their text, not the tooltip -->
+        <Setter Property="AutomationProperties.Name" Value=""/>
         <Setter Property="Padding" Value="8,0"/>
         <Setter Property="Template">
             <Setter.Value>

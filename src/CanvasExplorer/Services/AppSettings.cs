@@ -18,7 +18,14 @@ public sealed class AppSettings
     public double WinHeight { get; set; } = 800;
     public bool Maximized { get; set; }
 
-    static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CanvasExplorer");
+    /// <summary>Overrides both data folders (settings and fallback layouts); used by the UI tests.</summary>
+    public const string DataDirVariable = "CANVAS_EXPLORER_DATA";
+
+    static readonly string? DataOverride = Environment.GetEnvironmentVariable(DataDirVariable) is { Length: > 0 } d ? d : null;
+    static readonly string Dir = DataOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CanvasExplorer");
+
+    /// <summary>Folder for machine-local data (%LocalAppData%\CanvasExplorer unless overridden).</summary>
+    public static string LocalDir => DataOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CanvasExplorer");
     static readonly string FilePath = Path.Combine(Dir, "settings.json");
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
 

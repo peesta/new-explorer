@@ -12,8 +12,8 @@ public static class Format
         if (bytes < 1024) return bytes + " Б";
         double v = bytes;
         var i = -1;
-        do { v /= 1024; i++; } while (v >= 1024 && i < Units.Length - 1);
-        return v.ToString(v < 10 ? "0.#" : "0", Ru) + " " + Units[i];
+        do { v /= 1024; i++; } while (Math.Round(v) >= 1024 && i < Units.Length - 1);
+        return v.ToString(Math.Round(v, 1) < 10 ? "0.#" : "0", Ru) + " " + Units[i];
     }
 
     public static string ShortDate(DateTime d)

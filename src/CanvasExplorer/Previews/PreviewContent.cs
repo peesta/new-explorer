@@ -41,6 +41,9 @@ public abstract class PreviewContent : Border
 
     public virtual void OnRenamed(FileItem item) => Item = item;
 
+    /// <summary>The file was written by another program (or by us). Re-read it if the view depends on it.</summary>
+    public virtual void OnFileChanged() { }
+
     /// <summary>Keyboard shortcut while the window is focused (e.g. Space = play/pause).</summary>
     public virtual bool HandleKey(System.Windows.Input.Key key) => false;
 }

@@ -91,6 +91,11 @@ public partial class FileListView : UserControl
             foreach (var it in _items)
                 if (keepSelected.Contains(it.Name)) List.SelectedItems.Add(it);
         }
+        // The Shift+click anchor survives a refresh (the items are new objects with the same names).
+        _anchor = keepSelected != null && _anchor != null
+            ? _items.FirstOrDefault(i => string.Equals(i.Name, _anchor.Name, StringComparison.OrdinalIgnoreCase))
+            : null;
+        _pendingSingle = null;
         UpdateCount();
     }
 
@@ -124,6 +129,10 @@ public partial class FileListView : UserControl
     {
         var total = _items.Count;
         var text = Format.Plural(total, "объект", "объекта", "объектов");
+        // While searching, say how many of them match.
+        // "из" takes the genitive: из 1 объекта, из 2 объектов, из 21 объекта.
+        if (_filter.Length > 0)
+            text = "найдено " + _view.Cast<object>().Count() + " из " + Format.Plural(total, "объекта", "объектов", "объектов");
         if (PinnedCount > 0) text += " · " + PinnedCount + " на холсте";
         var sel = List.SelectedItems.Count;
         if (sel > 1) text += " · выбрано " + sel;
@@ -531,7 +540,7 @@ public partial class FileListView : UserControl
             Menus.Item("Переименовать", Icons.Rename, () => Host?.RenameItem(first), "F2", enabled: sel.Count == 1),
             Menus.Item("Удалить", Icons.Trash, DeleteSelected, "Del", danger: true),
             Menus.Sep(),
-            Menus.Item("Копировать путь", Icons.Path, () => Clipboard.SetText(string.Join(Environment.NewLine, sel.Select(i => i.FullPath)))),
+            Menus.Item("Копировать путь", Icons.Path, () => Shell.SetClipboardText(string.Join(Environment.NewLine, sel.Select(i => i.FullPath)))),
             Menus.Item("Свойства", Icons.Info, () => Shell.ShowProperties(first.FullPath), "Alt+Enter"));
     }
 

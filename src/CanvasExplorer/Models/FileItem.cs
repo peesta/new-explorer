@@ -51,6 +51,9 @@ public sealed class FileItem : INotifyPropertyChanged
         set { if (_pinned != value) { _pinned = value; Changed(); } }
     }
 
+    /// <summary>Shown by screen readers and UI automation for the list row.</summary>
+    public override string ToString() => Name;
+
     public event PropertyChangedEventHandler? PropertyChanged;
     void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

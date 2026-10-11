@@ -33,6 +33,8 @@ public partial class MainWindow : Window, IExplorerHost
     FolderTab? _tabHoverTarget;
     readonly List<RadioButton> _sideItems = new();
     readonly DispatcherTimer _refreshTimer;
+    readonly DispatcherTimer _settingsTimer;
+    readonly HashSet<string> _changedFiles = new(StringComparer.OrdinalIgnoreCase);
     FileSystemWatcher? _watcher;
     string? _current;
     int _loadVersion;
@@ -48,7 +50,15 @@ public partial class MainWindow : Window, IExplorerHost
         CanvasArea.PinsChanged += (_, _) => SyncPinnedFlags();
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        _refreshTimer.Tick += (_, _) => { _refreshTimer.Stop(); _ = LoadItemsAsync(keepCanvas: true); };
+        _refreshTimer.Tick += (_, _) =>
+        {
+            _refreshTimer.Stop();
+            _ = LoadItemsAsync(keepCanvas: true);
+            foreach (var name in _changedFiles) CanvasArea.FileChanged(name);
+            _changedFiles.Clear();
+        };
+        _settingsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _settingsTimer.Tick += (_, _) => { _settingsTimer.Stop(); SaveSettings(); };
 
         BackBtn.Click += (_, _) => GoBack();
         ForwardBtn.Click += (_, _) => GoForward();
@@ -84,8 +94,13 @@ public partial class MainWindow : Window, IExplorerHost
         };
         SideGrip.DragDelta += (_, e) =>
             SideColumn.Width = new GridLength(Math.Clamp(SideColumn.ActualWidth + e.HorizontalChange, 150, 420));
+        SideGrip.DragCompleted += (_, _) => ScheduleSettingsSave();
+        LocationChanged += (_, _) => ScheduleSettingsSave();
+        SizeChanged += (_, _) => ScheduleSettingsSave();
+        // The folder may have been deleted or renamed elsewhere while the window was in the background.
+        Activated += (_, _) => { if (_current != null && !Directory.Exists(_current)) RefreshFolder(); };
 
-        StateChanged += (_, _) => OnStateChanged();
+        StateChanged += (_, _) => { OnStateChanged(); ScheduleSettingsSave(); };
         SourceInitialized += (_, _) => OnSourceInitialized();
         Loaded += (_, _) => OnLoaded();
         Closing += (_, _) => OnClosing();
@@ -155,8 +170,15 @@ public partial class MainWindow : Window, IExplorerHost
         var args = Environment.GetCommandLineArgs();
         if (args.Length > 1 && Directory.Exists(args[1]))
         {
-            _tabs.Add(new FolderTab { Path = Path.GetFullPath(args[1]) });
-            active = _tabs.Count - 1;
+            // A folder that is already open in a tab is brought to front, not opened twice.
+            var path = Path.GetFullPath(args[1]);
+            var open = _tabs.FindIndex(t => Shell.SameFolder(t.Path, path));
+            if (open >= 0) active = open;
+            else
+            {
+                _tabs.Add(new FolderTab { Path = path });
+                active = _tabs.Count - 1;
+            }
         }
         if (_tabs.Count == 0)
         {
@@ -173,6 +195,21 @@ public partial class MainWindow : Window, IExplorerHost
     {
         CanvasArea.SaveNow();
         CanvasArea.FlushPins();
+        _settingsTimer.Stop();
+        SaveSettings();
+        _watcher?.Dispose();
+    }
+
+    /// <summary>Settings are written shortly after every change, so a crash does not lose tabs and sizes.</summary>
+    void ScheduleSettingsSave()
+    {
+        if (!IsLoaded) return;
+        _settingsTimer.Stop();
+        _settingsTimer.Start();
+    }
+
+    void SaveSettings()
+    {
         var s = AppSettings.Current;
         s.SidebarWidth = SideColumn.ActualWidth;
         s.Maximized = WindowState == WindowState.Maximized;
@@ -185,7 +222,6 @@ public partial class MainWindow : Window, IExplorerHost
         s.Tabs = _tabs.Select(t => t.Path).ToList();
         s.ActiveTab = _tabs.IndexOf(_tab);
         s.Save();
-        _watcher?.Dispose();
     }
 
     // ---------- sidebar ----------
@@ -260,6 +296,7 @@ public partial class MainWindow : Window, IExplorerHost
             ToolTip = path,
         };
         ToolTipService.SetInitialShowDelay(rb, 1200);
+        System.Windows.Automation.AutomationProperties.SetName(rb, label);
         rb.Click += (_, _) => NavigateTo(path);
         rb.AllowDrop = true;
         rb.DragOver += (_, e) =>
@@ -318,6 +355,8 @@ public partial class MainWindow : Window, IExplorerHost
     void Show(string folder)
     {
         CanvasArea.SaveNow();
+        // Going to a folder above the current one (Up, Back, a path segment) selects the folder we came from.
+        if (_current != null && ChildOnTheWay(folder, _current) is { } child) _pendingReveal = child;
         _current = folder;
         _tab.Path = folder;
         Title = FolderName(folder);
@@ -327,7 +366,9 @@ public partial class MainWindow : Window, IExplorerHost
         UpdateNavButtons();
         HighlightSidebar();
         Watch(folder);
+        _changedFiles.Clear();
         _ = LoadItemsAsync(keepCanvas: false);
+        ScheduleSettingsSave();
     }
 
     void GoBack()
@@ -349,9 +390,7 @@ public partial class MainWindow : Window, IExplorerHost
         if (_current == null) return;
         var parent = Directory.GetParent(_current);
         if (parent == null) return;
-        var child = Path.GetFileName(_current.TrimEnd('\\'));
         NavigateTo(parent.FullName);
-        _pendingReveal = child;
     }
 
     string? _pendingReveal;
@@ -380,6 +419,12 @@ public partial class MainWindow : Window, IExplorerHost
             items = new List<FileItem>();
             error = "Нет доступа к этой папке";
         }
+        catch (DirectoryNotFoundException) when (!Directory.Exists(folder))
+        {
+            // The open folder was deleted or renamed elsewhere: step up to the nearest folder that still exists.
+            if (version == _loadVersion && folder == _current && NearestExisting(folder) is { } up) Show(up);
+            return;
+        }
         catch (Exception ex)
         {
             items = new List<FileItem>();
@@ -400,6 +445,23 @@ public partial class MainWindow : Window, IExplorerHost
             _pendingReveal = null;
         }
         else if (!keepCanvas) _list.FocusList();
+    }
+
+    /// <summary>The first path segment of <paramref name="inner"/> below <paramref name="outer"/>, if it lies inside it.</summary>
+    internal static string? ChildOnTheWay(string outer, string inner)
+    {
+        var o = Path.EndsInDirectorySeparator(outer) ? outer : outer + Path.DirectorySeparatorChar;
+        if (!inner.StartsWith(o, StringComparison.OrdinalIgnoreCase) || inner.Length <= o.Length) return null;
+        var rest = inner[o.Length..];
+        var cut = rest.IndexOf(Path.DirectorySeparatorChar);
+        return cut < 0 ? rest : rest[..cut];
+    }
+
+    static string? NearestExisting(string folder)
+    {
+        for (var d = Directory.GetParent(folder); d != null; d = d.Parent)
+            if (d.Exists) return d.FullName;
+        return null;
     }
 
     static List<FileItem> Enumerate(string folder)
@@ -423,8 +485,14 @@ public partial class MainWindow : Window, IExplorerHost
     void SyncPinnedFlags()
     {
         var pinned = new HashSet<string>(CanvasArea.PinnedNames, StringComparer.OrdinalIgnoreCase);
-        foreach (var it in _list.Items) it.IsPinned = pinned.Contains(it.Name);
-        _list.PinnedCount = pinned.Count;
+        var count = 0;
+        foreach (var it in _list.Items)
+        {
+            it.IsPinned = pinned.Contains(it.Name);
+            if (it.IsPinned) count++;
+        }
+        // Pins kept for files that are gone (renamed, deleted, drive offline) are not counted.
+        _list.PinnedCount = count;
         _list.UpdateCount();
     }
 
@@ -445,6 +513,8 @@ public partial class MainWindow : Window, IExplorerHost
             w.Deleted += OnFsEvent;
             w.Changed += OnFsEvent;
             w.Renamed += (_, e) => Dispatcher.BeginInvoke(() => OnRenamed(e.OldName, e.Name, e.FullPath));
+            // Buffer overflow or the folder itself vanished: re-read everything.
+            w.Error += (_, _) => Dispatcher.BeginInvoke(() => { _refreshTimer.Stop(); _refreshTimer.Start(); });
             w.EnableRaisingEvents = true;
             _watcher = w;
         }
@@ -456,14 +526,25 @@ public partial class MainWindow : Window, IExplorerHost
 
     void OnFsEvent(object sender, FileSystemEventArgs e)
     {
-        if (e.Name == null || e.Name == LayoutStore.FileName || e.Name.EndsWith(".~tmp", StringComparison.OrdinalIgnoreCase)) return;
-        Dispatcher.BeginInvoke(() => { _refreshTimer.Stop(); _refreshTimer.Start(); });
+        var name = e.Name;
+        if (name == null || name == LayoutStore.FileName || name.EndsWith(".~tmp", StringComparison.OrdinalIgnoreCase)) return;
+        var written = e.ChangeType is WatcherChangeTypes.Changed or WatcherChangeTypes.Created;
+        var folder = Path.GetDirectoryName(e.FullPath);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (written && Shell.SameFolder(folder, _current)) _changedFiles.Add(name);
+            _refreshTimer.Stop();
+            _refreshTimer.Start();
+        });
     }
 
     void OnRenamed(string? oldName, string? newName, string fullPath)
     {
-        if (oldName != null && newName != null && File.Exists(fullPath))
+        // Editors often save by writing a temporary file and renaming it over the original.
+        var replaced = newName != null && oldName != null && CanvasArea.PinnedNames.Contains(newName, StringComparer.OrdinalIgnoreCase);
+        if (oldName != null && newName != null && File.Exists(fullPath) && !replaced)
             CanvasArea.RenameFile(oldName, new FileItem(new FileInfo(fullPath)));
+        if (replaced) _changedFiles.Add(newName!);
         _refreshTimer.Stop();
         _refreshTimer.Start();
     }
@@ -787,24 +868,61 @@ public partial class MainWindow : Window, IExplorerHost
 
     public void RenameItem(FileItem item)
     {
+        var folder = Path.GetDirectoryName(item.FullPath)!;
         var dot = item.IsFolder ? -1 : item.Name.LastIndexOf('.');
-        var name = InputDialog.Ask(this, "Переименовать", item.Name, dot > 0 ? dot : -1);
-        if (string.IsNullOrEmpty(name) || name == item.Name) return;
-        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            MessageBox.Show(this, "Имя содержит недопустимые символы.", "Переименование", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        var dest = Path.Combine(Path.GetDirectoryName(item.FullPath)!, name);
+        var name = InputDialog.Ask(this, "Переименовать", item.Name, dot > 0 ? dot : -1, s => NameProblem(s, folder, item.Name));
+        if (name == null) return;
+        name = CleanName(name);
+        if (name == item.Name) return;
+        if (Rename(item.FullPath, name, item.IsFolder)) _pendingReveal = name;
+    }
+
+    /// <summary>Windows drops trailing dots and spaces from names; do it up front so the name shown is the name stored.</summary>
+    static string CleanName(string name) => name.Trim().TrimEnd('.', ' ');
+
+    static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
+    /// <summary>Why <paramref name="raw"/> can't be used as a name in <paramref name="folder"/>, or null if it can.</summary>
+    internal static string? NameProblem(string raw, string folder, string? currentName)
+    {
+        var name = CleanName(raw);
+        if (name.Length == 0) return "Введите имя.";
+        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return "Имя не может содержать символы \\ / : * ? \" < > |";
+        if (ReservedNames.Contains(Path.GetFileNameWithoutExtension(name))) return "Это имя зарезервировано Windows.";
+        if (string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)) return null;
+        var target = Path.Combine(folder, name);
+        if (File.Exists(target) || Directory.Exists(target)) return "Файл или папка с таким именем уже есть.";
+        return null;
+    }
+
+    /// <summary>Renames a file or folder in place; reports a failure to the user.</summary>
+    bool Rename(string path, string newName, bool isFolder)
+    {
+        var dest = Path.Combine(Path.GetDirectoryName(path)!, newName);
         try
         {
-            if (item.IsFolder) Directory.Move(item.FullPath, dest);
-            else File.Move(item.FullPath, dest);
-            _pendingReveal = name;
+            if (isFolder)
+            {
+                // A folder can't be moved onto its own name in another letter case directly.
+                if (string.Equals(path, dest, StringComparison.OrdinalIgnoreCase))
+                {
+                    var step = dest + ".~ren" + Environment.TickCount;
+                    Directory.Move(path, step);
+                    Directory.Move(step, dest);
+                }
+                else Directory.Move(path, dest);
+            }
+            else File.Move(path, dest);
+            return true;
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Переименование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
         }
     }
 
@@ -849,21 +967,13 @@ public partial class MainWindow : Window, IExplorerHost
     /// <summary>Offers to rename a just-created item; returns its final name.</summary>
     string AskNewName(string name, bool isFolder)
     {
+        var folder = _current!;
         var dot = isFolder ? -1 : name.LastIndexOf('.');
-        var wanted = InputDialog.Ask(this, isFolder ? "Имя новой папки" : "Имя нового файла", name, dot > 0 ? dot : -1);
-        if (string.IsNullOrEmpty(wanted) || wanted == name || wanted.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return name;
-        var from = Path.Combine(_current!, name);
-        var to = Path.Combine(_current!, wanted);
-        try
-        {
-            if (isFolder) Directory.Move(from, to);
-            else File.Move(from, to);
-            return wanted;
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Переименование", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return name;
-        }
+        var wanted = InputDialog.Ask(this, isFolder ? "Имя новой папки" : "Имя нового файла", name, dot > 0 ? dot : -1,
+            s => NameProblem(s, folder, name));
+        if (wanted == null) return name;
+        wanted = CleanName(wanted);
+        if (wanted == name) return name;
+        return Rename(Path.Combine(folder, name), wanted, isFolder) ? wanted : name;
     }
 }

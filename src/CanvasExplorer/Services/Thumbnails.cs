@@ -31,8 +31,8 @@ public static class Thumbnails
             bi.EndInit();
             bi.Freeze();
             var thumb = new Thumb(bi, w, h);
+            if (!Cache.ContainsKey(path)) Order.Enqueue(path);
             Cache[path] = (modified, thumb);
-            Order.Enqueue(path);
             while (Order.Count > MaxCached) Cache.Remove(Order.Dequeue());
             return thumb;
         }

@@ -25,6 +25,9 @@ public partial class CanvasView : UserControl
     readonly DrawingBrush _dots;
     readonly DispatcherTimer _saveTimer;
     readonly List<PreviewWindow> _pins = new();
+    // Pins whose files were not found when the folder opened (renamed while closed, drive offline):
+    // they stay in the layout instead of being silently dropped on the next save.
+    readonly List<PinState> _missing = new();
     readonly FloatingFrame _listFrame = new();
     FileListView? _list;
     string? _folder;
@@ -53,7 +56,10 @@ public partial class CanvasView : UserControl
         _listFrame.MinH = 160;
         _listFrame.BoundsCommitted += OnListBoundsCommitted;
         _listFrame.Snap = SnapList;
+        // Working in the list deselects the pinned window, so Delete can never reach it from there.
+        _listFrame.Activated += (_, _) => Select(null);
         _listFrame.FrameCornerRadius = 8;
+        System.Windows.Automation.AutomationProperties.SetAutomationId(_listFrame, "ListWindow");
         Panel.SetZIndex(_listFrame, 0);
         World.Children.Add(_listFrame);
 
@@ -67,7 +73,8 @@ public partial class CanvasView : UserControl
             else FollowAnchors();
         };
         Surface.MouseLeftButtonDown += OnSurfaceDown;
-        Surface.PreviewMouseDown += OnSurfacePreviewDown;
+        // Bubbling, not preview: a middle click on a folder in the list opens it in a new tab first.
+        Surface.MouseDown += OnSurfaceMiddleDown;
         Surface.MouseMove += OnSurfaceMove;
         Surface.MouseUp += OnSurfaceUp;
         Surface.LostMouseCapture += (_, _) => _panFrom = null;
@@ -86,8 +93,10 @@ public partial class CanvasView : UserControl
         Surface.ContextMenu = new ContextMenu();
         Surface.ContextMenuOpening += OnSurfaceMenu;
 
-        CornerZone.MouseEnter += (_, _) => FadeZoomPanel(1);
-        CornerZone.MouseLeave += (_, _) => FadeZoomPanel(0);
+        // The zoom panel appears when the pointer nears the corner over empty canvas. The corner itself
+        // takes no input, so the list or a window lying there stays fully clickable.
+        Surface.PreviewMouseMove += (_, e) => UpdateZoomPanel(e);
+        Surface.MouseLeave += (_, _) => ShowZoomPanel(false);
         ZoomInBtn.Click += (_, _) => ZoomAt(Center, _scale.ScaleX * 1.2);
         ZoomOutBtn.Click += (_, _) => ZoomAt(Center, _scale.ScaleX / 1.2);
         ZoomResetBtn.Click += (_, _) => ResetView();
@@ -99,8 +108,9 @@ public partial class CanvasView : UserControl
     public IExplorerHost? Host { get; set; }
     public bool HasCanvas => _layout != null && !_docked;
     public event EventHandler? PinsChanged;
+    /// <summary>Pinned file names, including pins kept while the canvas is folded away or the file is missing.</summary>
     public IEnumerable<string> PinnedNames =>
-        _docked && _layout != null ? _layout.Items.Select(i => i.Name) : _pins.Select(p => p.Item.Name);
+        _docked && _layout != null ? _layout.Items.Select(i => i.Name) : _pins.Select(p => p.Item.Name).Concat(_missing.Select(m => m.Name));
 
     public void AttachList(FileListView list)
     {
@@ -117,6 +127,7 @@ public partial class CanvasView : UserControl
         SaveNow();
         StopAnimation();
         ClearPins();
+        _missing.Clear();
         _folder = folder;
         _layout = LayoutStore.Load(folder);
         _docked = _layout?.Docked == true;
@@ -141,24 +152,47 @@ public partial class CanvasView : UserControl
 
     void RestorePins(IReadOnlyList<FileItem> items)
     {
+        _missing.Clear();
         if (_layout == null) return;
         foreach (var p in _layout.Items)
         {
             var item = items.FirstOrDefault(i => string.Equals(i.Name, p.Name, StringComparison.OrdinalIgnoreCase));
-            if (item == null || item.IsFolder) continue;
-            var pw = AddPin(item, new Rect(p.X, p.Y, p.W, p.H), fit: false);
-            if (Math.Abs(p.Zoom - 1) > 0.001) pw.Body.SetZoom(p.Zoom);
-            pw.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(Anim.Short)));
+            if (item == null) _missing.Add(p);
+            else if (!item.IsFolder) RestorePin(item, p);
         }
     }
 
-    /// <summary>The folder was re-read: drop pins whose files disappeared.</summary>
+    void RestorePin(FileItem item, PinState p)
+    {
+        var pw = AddPin(item, new Rect(p.X, p.Y, p.W, p.H), fit: false);
+        if (Math.Abs(p.Zoom - 1) > 0.001) pw.Body.SetZoom(p.Zoom);
+        pw.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(Anim.Short)));
+    }
+
+    /// <summary>The folder was re-read: drop pins whose files disappeared, bring back missing ones that reappeared.</summary>
     public void SyncItems(IReadOnlyList<FileItem> items)
     {
         var names = new HashSet<string>(items.Select(i => i.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var pw in _pins.Where(p => !names.Contains(p.Item.Name)).ToList())
             RemovePin(pw, save: false);
+        if (HasCanvas)
+        {
+            foreach (var m in _missing.ToList())
+            {
+                var item = items.FirstOrDefault(i => string.Equals(i.Name, m.Name, StringComparison.OrdinalIgnoreCase));
+                if (item == null) continue;
+                _missing.Remove(m);
+                if (!item.IsFolder) RestorePin(item, m);
+            }
+        }
         RaisePinsChanged();
+    }
+
+    /// <summary>A file in the folder was written by another program: its pinned window re-reads it.</summary>
+    public void FileChanged(string name)
+    {
+        foreach (var pw in _pins.Where(p => string.Equals(p.Item.Name, name, StringComparison.OrdinalIgnoreCase)))
+            pw.Body.OnFileChanged();
     }
 
     public void RenameFile(string oldName, FileItem renamed)
@@ -172,6 +206,8 @@ public partial class CanvasView : UserControl
         }
         foreach (var pw in _pins.Where(p => string.Equals(p.Item.Name, oldName, StringComparison.OrdinalIgnoreCase)))
             pw.Rename(renamed);
+        foreach (var m in _missing.Where(m => string.Equals(m.Name, oldName, StringComparison.OrdinalIgnoreCase)))
+            m.Name = renamed.Name;
         ScheduleSave();
     }
 
@@ -207,6 +243,7 @@ public partial class CanvasView : UserControl
         if (_folder == null || _layout == null) return;
         StopAnimation();
         ClearPins();
+        _missing.Clear();
         _layout = null;
         _docked = false;
         _saveTimer.Stop();
@@ -219,13 +256,14 @@ public partial class CanvasView : UserControl
     void CollapseCanvas()
     {
         if (_folder == null || _layout == null) return;
-        if (_pins.Count == 0)
+        if (_pins.Count == 0 && _missing.Count == 0)
         {
             RemoveCanvas();
             return;
         }
         Save();
         ClearPins();
+        _missing.Clear();
         _docked = true;
         _layout.Docked = true;
         LayoutStore.Save(_folder, _layout);
@@ -311,6 +349,7 @@ public partial class CanvasView : UserControl
         _listFrame.Edges = ResizeEdges.Horizontal;
         _listFrame.IsMovable = false;
         _listFrame.HasShadow = false;
+        ShowZoomPanel(false);
         CornerZone.Visibility = Visibility.Collapsed;
         Dock();
         UpdateView();
@@ -366,7 +405,7 @@ public partial class CanvasView : UserControl
             if (existing != null) { last = existing; continue; }
             var body = PreviewFactory.Create(item);
             var size = body.PreferredSize;
-            var pos = worldPos is { } wp ? new Point(wp.X + offset, wp.Y + offset) : NextSpot();
+            var pos = worldPos is { } wp ? new Point(wp.X + offset, wp.Y + offset) : NextSpot(size);
             last = AddPin(item, new Rect(pos, size), fit: true, body);
             offset += 28;
         }
@@ -411,11 +450,22 @@ public partial class CanvasView : UserControl
         _selected = null;
     }
 
-    Point NextSpot()
+    /// <summary>Where a new pin goes: right of the list, cascading, but always inside the visible area.</summary>
+    Point NextSpot(Size size)
     {
         var l = _listFrame.Bounds;
         var n = _pins.Count % 8;
-        return new Point(l.Right + 28 + n * 28, l.Top + 20 + n * 28);
+        var p = new Point(l.Right + 28 + n * 28, l.Top + 20 + n * 28);
+        var z = _scale.ScaleX;
+        var v = new Rect(-_pan.X / z, -_pan.Y / z, Surface.ActualWidth / z, Surface.ActualHeight / z);
+        if (v.Width <= 0 || v.Height <= 0) return p;
+        // Pinning never moves the view, so a window that would land out of sight is pulled into it instead.
+        const double margin = 12;
+        if (p.X + size.Width > v.Right - margin) p.X = v.Right - margin - size.Width - n * 28;
+        if (p.Y + size.Height > v.Bottom - margin) p.Y = v.Bottom - margin - size.Height - n * 28;
+        p.X = Math.Max(p.X, v.Left + margin);
+        p.Y = Math.Max(p.Y, v.Top + margin);
+        return p;
     }
 
     void Select(PreviewWindow? pw)
@@ -465,7 +515,7 @@ public partial class CanvasView : UserControl
         if (HasCanvas) BeginPan(e);
     }
 
-    void OnSurfacePreviewDown(object sender, MouseButtonEventArgs e)
+    void OnSurfaceMiddleDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Middle && HasCanvas) BeginPan(e);
     }
@@ -658,8 +708,22 @@ public partial class CanvasView : UserControl
         };
     }
 
-    void FadeZoomPanel(double to) =>
-        ZoomPanel.BeginAnimation(OpacityProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(to > 0 ? 120 : 260)));
+    void UpdateZoomPanel(MouseEventArgs e)
+    {
+        if (!HasCanvas) return;
+        var p = e.GetPosition(Surface);
+        var near = p.X >= Surface.ActualWidth - CornerZone.Width && p.Y >= Surface.ActualHeight - CornerZone.Height;
+        // Over the list or a window lying in the corner the panel does not appear, so they stay clickable.
+        var overPanel = e.OriginalSource is DependencyObject d && ZoomPanel.IsAncestorOf(d);
+        ShowZoomPanel(overPanel || (near && (e.OriginalSource == Surface || _panFrom != null)));
+    }
+
+    void ShowZoomPanel(bool show)
+    {
+        if (ZoomPanel.IsHitTestVisible == show) return;
+        ZoomPanel.IsHitTestVisible = show;
+        ZoomPanel.BeginAnimation(OpacityProperty, new DoubleAnimation(show ? 1 : 0, TimeSpan.FromMilliseconds(show ? 120 : 260)));
+    }
 
     // ---------- drag & drop: pin files from the list ----------
 
@@ -750,7 +814,7 @@ public partial class CanvasView : UserControl
         {
             var b = p.Bounds;
             return new PinState { Name = p.Item.Name, X = b.X, Y = b.Y, W = b.Width, H = b.Height, Zoom = p.Body.Zoom };
-        }).ToList();
+        }).Concat(_missing).ToList();
         LayoutStore.Save(_folder, _layout);
     }
 

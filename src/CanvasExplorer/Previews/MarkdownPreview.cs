@@ -23,12 +23,15 @@ public sealed class MarkdownPreview : PreviewContent
     readonly RadioButton _codeBtn;
     readonly FrameworkElement _modeBar;
     readonly DispatcherTimer _saveTimer;
+    readonly DispatcherTimer _checkTimer;
     readonly ScaleTransform _zoomTransform = new(1, 1);
 
     string _markdown = "";
     string _newline = "\n";
     Encoding _encoding = new UTF8Encoding(false);
+    FileStamp _stamp;
     bool _loading = true;
+    bool _resolving;
     bool _building;
     bool _previewMode = true;
     bool _richChanged;
@@ -103,7 +106,9 @@ public sealed class MarkdownPreview : PreviewContent
 
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); Save(); };
-        _ = LoadAsync();
+        _checkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _checkTimer.Tick += (_, _) => { _checkTimer.Stop(); CheckDisk(); };
+        _ = LoadAsync(reload: false);
     }
 
     public override bool SupportsZoom => true;
@@ -119,30 +124,70 @@ public sealed class MarkdownPreview : PreviewContent
         RaiseState();
     }
 
-    async Task LoadAsync()
+    async Task LoadAsync(bool reload)
     {
+        _loading = true;
         try
         {
             var path = Item.FullPath;
-            var (text, encoding, truncated) = await Task.Run(() => TextFile.Read(path));
+            var (text, encoding, truncated, stamp) = await Task.Run(() =>
+            {
+                var s = FileStamp.Of(path);
+                var (t, enc, cut) = TextFile.Read(path);
+                return (t, enc, cut, s);
+            });
             _encoding = encoding;
+            _stamp = stamp;
             _markdown = text;
             _newline = text.Contains("\r\n") ? "\r\n" : "\n";
             _readOnly = truncated;
             _rich.IsReadOnly = _code.IsReadOnly = truncated;
-            BuildPreview();
+            if (_previewMode)
+            {
+                // A reload keeps the reader's place.
+                var offset = _rich.VerticalOffset;
+                BuildPreview();
+                if (reload) _rich.ScrollToVerticalOffset(offset);
+            }
+            else
+            {
+                var caret = _code.CaretIndex;
+                _building = true;
+                _code.Text = text;
+                _building = false;
+                _code.CaretIndex = Math.Min(caret, text.Length);
+            }
         }
         catch (Exception ex)
         {
-            _markdown = "Не удалось открыть файл: " + ex.Message;
-            _readOnly = true;
-            _rich.IsReadOnly = _code.IsReadOnly = true;
-            BuildPreview();
+            if (!reload)
+            {
+                _markdown = "Не удалось открыть файл: " + ex.Message;
+                _readOnly = true;
+                _rich.IsReadOnly = _code.IsReadOnly = true;
+                BuildPreview();
+            }
         }
         finally
         {
             _loading = false;
         }
+    }
+
+    public override void OnFileChanged()
+    {
+        _checkTimer.Stop();
+        _checkTimer.Start();
+    }
+
+    /// <summary>Re-reads the file if another program changed it; with unsaved edits the save asks first.</summary>
+    void CheckDisk()
+    {
+        if (_loading || _resolving) return;
+        var now = FileStamp.Of(Item.FullPath);
+        if (!now.Exists || now == _stamp) return;
+        if (_dirty) Save();
+        else _ = LoadAsync(reload: true);
     }
 
     void BuildPreview()
@@ -207,10 +252,30 @@ public sealed class MarkdownPreview : PreviewContent
 
     void Save()
     {
-        if (!_dirty || _readOnly) return;
+        if (!_dirty || _readOnly || _loading || _resolving) return;
+        _saveTimer.Stop();
+        var path = Item.FullPath;
+        var now = FileStamp.Of(path);
+        // Deleted meanwhile: writing would bring the file back.
+        if (!now.Exists) return;
+        if (now != _stamp)
+        {
+            _resolving = true;
+            var keep = FileStamp.AskKeepEdits(Item.Name);
+            _resolving = false;
+            if (!keep)
+            {
+                _dirty = false;
+                RaiseState();
+                _ = LoadAsync(reload: true);
+                return;
+            }
+        }
         try
         {
-            TextFile.Write(Item.FullPath, CurrentMarkdown(), _encoding);
+            TextFile.Write(path, CurrentMarkdown(), _encoding);
+            _stamp = FileStamp.Of(path);
+            ToolTip = null;
             _dirty = false;
             RaiseState();
         }
@@ -291,6 +356,7 @@ public sealed class MarkdownPreview : PreviewContent
 
     public override void Unload()
     {
+        _checkTimer.Stop();
         _saveTimer.Stop();
         Save();
     }

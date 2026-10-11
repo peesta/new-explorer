@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -85,6 +86,15 @@ public class FloatingFrame : Grid
         Children.Add(_host);
         Children.Add(_glow);
         Children.Add(_ring);
+    }
+
+    // Panels are invisible to screen readers and UI automation; a window on the canvas should not be.
+    protected override AutomationPeer OnCreateAutomationPeer() => new FramePeer(this);
+
+    sealed class FramePeer(FloatingFrame owner) : FrameworkElementAutomationPeer(owner)
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Pane;
+        protected override string GetClassNameCore() => nameof(FloatingFrame);
     }
 
     public UIElement? Child

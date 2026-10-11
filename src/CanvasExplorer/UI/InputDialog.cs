@@ -9,9 +9,12 @@ namespace CanvasExplorer.UI;
 public sealed class InputDialog : Window
 {
     readonly TextBox _box;
+    readonly TextBlock _error;
+    readonly Func<string, string?>? _validate;
 
-    InputDialog(string title, string value, int selectLength)
+    InputDialog(string title, string value, int selectLength, Func<string, string?>? validate)
     {
+        _validate = validate;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -36,7 +39,18 @@ public sealed class InputDialog : Window
         var ok = new Button { Content = "Готово", Height = 26, IsDefault = true, Style = (Style)FindResource("AccentButton"), Padding = new Thickness(14, 0, 14, 0) };
         var cancel = new Button { Content = "Отмена", Height = 26, IsCancel = true, Style = (Style)FindResource("TextButton"), Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(0, 0, 6, 0) };
         cancel.SetResourceReference(ForegroundProperty, "TextBrush");
-        ok.Click += (_, _) => { DialogResult = true; };
+        ok.Click += (_, _) =>
+        {
+            // A bad name keeps the dialog open with the reason, instead of losing what was typed.
+            if (_validate?.Invoke(_box.Text.Trim()) is { } problem)
+            {
+                _error!.Text = problem;
+                _error.Visibility = Visibility.Visible;
+                _box.Focus();
+                return;
+            }
+            DialogResult = true;
+        };
         cancel.Click += (_, _) => { DialogResult = false; };
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
@@ -46,9 +60,16 @@ public sealed class InputDialog : Window
         var heading = new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) };
         heading.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
 
+        _error = new TextBlock { FontSize = 11.5, Margin = new Thickness(0, 6, 0, 0), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        _error.SetResourceReference(TextBlock.ForegroundProperty, "DangerBrush");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(_error, "InputError");
+        _box.TextChanged += (_, _) => _error.Visibility = Visibility.Collapsed;
+        System.Windows.Automation.AutomationProperties.SetAutomationId(_box, "InputBox");
+
         var panel = new StackPanel { Width = 320 };
         panel.Children.Add(heading);
         panel.Children.Add(field);
+        panel.Children.Add(_error);
         panel.Children.Add(buttons);
 
         var card = new Border
@@ -72,9 +93,10 @@ public sealed class InputDialog : Window
         card.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) DragMove(); };
     }
 
-    public static string? Ask(Window owner, string title, string value, int selectLength = -1)
+    /// <param name="validate">Returns why the typed text is not acceptable, or null when it is.</param>
+    public static string? Ask(Window owner, string title, string value, int selectLength = -1, Func<string, string?>? validate = null)
     {
-        var dlg = new InputDialog(title, value, selectLength) { Owner = owner };
+        var dlg = new InputDialog(title, value, selectLength, validate) { Owner = owner, Title = title };
         return dlg.ShowDialog() == true ? dlg._box.Text.Trim() : null;
     }
 }

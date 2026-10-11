@@ -22,8 +22,7 @@ public static class LayoutStore
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    static readonly string FallbackDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CanvasExplorer", "layouts");
+    static readonly string FallbackDir = Path.Combine(AppSettings.LocalDir, "layouts");
 
     public static FolderLayout? Load(string folder)
     {
@@ -44,6 +43,8 @@ public static class LayoutStore
 
     public static void Save(string folder, FolderLayout layout)
     {
+        // The folder itself was deleted or renamed: there is nothing to keep a layout for.
+        if (!Directory.Exists(folder)) return;
         var text = JsonSerializer.Serialize(layout, Json);
         try
         {

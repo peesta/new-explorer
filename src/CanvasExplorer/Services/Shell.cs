@@ -97,7 +97,34 @@ public static class Shell
         var data = new DataObject();
         data.SetFileDropList(files);
         data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(cut ? 2 : 5)));
-        Clipboard.SetDataObject(data, true);
+        SetClipboardData(data);
+    }
+
+    public static void SetClipboardText(string text)
+    {
+        if (text.Length > 0) SetClipboardData(new DataObject(DataFormats.UnicodeText, text));
+    }
+
+    // Another program may hold the clipboard open for a moment (CLIPBRD_E_CANT_OPEN): retry briefly.
+    static void SetClipboardData(DataObject data)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                Clipboard.SetDataObject(data, true);
+                return;
+            }
+            catch (System.Runtime.InteropServices.ExternalException) when (attempt < 5)
+            {
+                Thread.Sleep(40);
+            }
+            catch (System.Runtime.InteropServices.ExternalException ex)
+            {
+                MessageBox.Show(ex.Message, "Буфер обмена занят", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
     }
 
     public static bool CanPaste()
@@ -107,17 +134,28 @@ public static class Shell
 
     public static void Paste(string destFolder, IntPtr owner)
     {
-        if (!CanPaste()) return;
-        var files = Clipboard.GetFileDropList().Cast<string>().ToArray();
+        string[] files;
         var cut = false;
-        if (Clipboard.GetData("Preferred DropEffect") is MemoryStream ms)
+        try
         {
-            var b = new byte[4];
-            if (ms.Read(b, 0, 4) == 4) cut = (BitConverter.ToInt32(b, 0) & 2) != 0;
+            if (!Clipboard.ContainsFileDropList()) return;
+            files = Clipboard.GetFileDropList().Cast<string>().ToArray();
+            if (Clipboard.GetData("Preferred DropEffect") is MemoryStream ms)
+            {
+                var b = new byte[4];
+                if (ms.Read(b, 0, 4) == 4) cut = (BitConverter.ToInt32(b, 0) & 2) != 0;
+            }
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return;
         }
         if (cut)
         {
-            if (Move(files, destFolder, owner)) Clipboard.Clear();
+            // Like Explorer: cutting and pasting into the same folder does nothing.
+            var moving = files.Where(f => !SameFolder(Path.GetDirectoryName(f), destFolder) && !SameFolder(f, destFolder)).ToList();
+            if (moving.Count == 0) return;
+            if (Move(moving, destFolder, owner)) Clipboard.Clear();
         }
         else Copy(files, destFolder, owner);
     }

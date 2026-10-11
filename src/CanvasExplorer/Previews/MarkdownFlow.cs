@@ -241,8 +241,10 @@ public static class MarkdownFlow
 
     public static InlineUIContainer MakeTaskBox(bool isChecked, Action onTask)
     {
-        var cb = new CheckBox { IsChecked = isChecked, Style = (Style)Application.Current.FindResource("TaskCheck") };
-        cb.Click += (_, _) => onTask();
+        var cb = new CheckBox { IsChecked = isChecked, Style = Application.Current?.TryFindResource("TaskCheck") as Style };
+        // Checked/Unchecked, not Click: toggling from the keyboard or a screen reader must be saved too.
+        cb.Checked += (_, _) => onTask();
+        cb.Unchecked += (_, _) => onTask();
         return new InlineUIContainer(cb) { BaselineAlignment = BaselineAlignment.Center };
     }
 

@@ -28,6 +28,8 @@ public sealed class PreviewWindow : FloatingFrame
         Item = item;
         Body = body;
         _fitToNaturalSize = fitToNaturalSize;
+        System.Windows.Automation.AutomationProperties.SetAutomationId(this, "PinnedWindow");
+        System.Windows.Automation.AutomationProperties.SetName(this, item.Name);
         MinW = 160;
         MinH = 90;
         Focusable = true;
@@ -107,6 +109,7 @@ public sealed class PreviewWindow : FloatingFrame
     public void Rename(FileItem item)
     {
         Item = item;
+        System.Windows.Automation.AutomationProperties.SetName(this, item.Name);
         _title.Text = item.Name;
         _title.ToolTip = item.FullPath;
         Body.OnRenamed(item);
@@ -170,7 +173,7 @@ public sealed class PreviewWindow : FloatingFrame
             Body.SupportsZoom ? Menus.Item("Уменьшить", Icons.ZoomOut, () => Body.ZoomBy(1 / 1.2)) : null,
             Body.SupportsZoom ? Menus.Item("Сбросить масштаб", Icons.Fit, () => Body.SetZoom(1)) : null,
             Body.SupportsZoom ? Menus.Sep() : null,
-            Menus.Item("Копировать путь", Icons.Path, () => Clipboard.SetText(path)),
+            Menus.Item("Копировать путь", Icons.Path, () => Shell.SetClipboardText(path)),
             Menus.Item("Свойства", Icons.Info, () => Shell.ShowProperties(path), "Alt+Enter"),
             Menus.Sep(),
             Menus.Item("Открепить с холста", Icons.Unpin, () => CloseRequested?.Invoke(this, EventArgs.Empty), "Del", danger: true));
