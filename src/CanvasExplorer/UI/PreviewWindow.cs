@@ -18,6 +18,7 @@ public sealed class PreviewWindow : FloatingFrame
     readonly TextBlock _zoomText;
     readonly StackPanel _zoomPanel;
     readonly Ellipse _dirtyDot;
+    readonly StackPanel _marks;
     bool _fitToNaturalSize;
 
     public event EventHandler? CloseRequested;
@@ -84,6 +85,11 @@ public sealed class PreviewWindow : FloatingFrame
         DockPanel.SetDock(_dirtyDot, Dock.Right);
         header.Children.Add(_dirtyDot);
 
+        _marks = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 4, 0) };
+        DockPanel.SetDock(_marks, Dock.Right);
+        header.Children.Add(_marks);
+        RefreshTags();
+
         _title = new TextBlock { Text = item.Name, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = item.FullPath };
         _title.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         header.Children.Add(_title);
@@ -106,6 +112,19 @@ public sealed class PreviewWindow : FloatingFrame
     public FileItem Item { get; private set; }
     public PreviewContent Body { get; }
 
+    /// <summary>Tag dots/icons of the file, shown in the header after the title.</summary>
+    public void RefreshTags()
+    {
+        _marks.Children.Clear();
+        foreach (var tag in TagStore.Current.TagsOf(Item.FullPath))
+        {
+            var mark = TagMark.Visual(tag, 8, 12);
+            mark.Margin = new Thickness(3, 0, 0, 0);
+            mark.ToolTip = tag.Name;
+            _marks.Children.Add(mark);
+        }
+    }
+
     public void Rename(FileItem item)
     {
         Item = item;
@@ -113,6 +132,7 @@ public sealed class PreviewWindow : FloatingFrame
         _title.Text = item.Name;
         _title.ToolTip = item.FullPath;
         Body.OnRenamed(item);
+        RefreshTags();
     }
 
     void OnNaturalSize(object? sender, Size px)

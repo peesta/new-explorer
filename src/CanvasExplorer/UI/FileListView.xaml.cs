@@ -63,7 +63,6 @@ public partial class FileListView : UserControl
         Header.ContextMenuOpening += (_, _) => Header.ContextMenu = BuildFolderMenu();
 
         _density = Math.Clamp(AppSettings.Current.Density, 0, 2);
-        _grid = AppSettings.Current.GridView;
         ApplyMode();
     }
 
@@ -97,6 +96,29 @@ public partial class FileListView : UserControl
             : null;
         _pendingSingle = null;
         UpdateCount();
+        LoadThumbnails();
+    }
+
+    CancellationTokenSource? _thumbs;
+
+    /// <summary>In the tile view, images and videos get their pictures (in the background, cached).</summary>
+    void LoadThumbnails()
+    {
+        _thumbs?.Cancel();
+        _thumbs = null;
+        if (!_grid) return;
+        var wanted = _items.Where(i => i.HasThumbnail && i.Thumb == null).ToList();
+        if (wanted.Count == 0) return;
+        var cts = _thumbs = new CancellationTokenSource();
+        var px = (int)Math.Ceiling(96 * Math.Max(1, VisualTreeHelper.GetDpi(this).DpiScaleX));
+        foreach (var item in wanted)
+        {
+            _ = ShellThumbnails.GetAsync(item.FullPath, item.Modified, px, cts.Token).ContinueWith(t =>
+            {
+                if (t.Result is { } bmp && !cts.IsCancellationRequested)
+                    Dispatcher.BeginInvoke(() => item.Thumb = bmp, System.Windows.Threading.DispatcherPriority.Background);
+            }, TaskScheduler.Default);
+        }
     }
 
     public void SetFilter(string text)
@@ -172,19 +194,36 @@ public partial class FileListView : UserControl
     {
         if (_suppressModeEvents) return;
         _density = d;
-        if (_grid) { _grid = false; }
         AppSettings.Current.Density = d;
-        AppSettings.Current.GridView = _grid;
+        AppSettings.ScheduleSave();
+        // Picking a row size means "list" for this folder.
+        if (_grid)
+        {
+            _grid = false;
+            Host?.SetFolderGrid(false);
+        }
         ApplyMode();
     }
 
     void SetGrid(bool grid)
     {
         if (_suppressModeEvents) return;
+        if (_grid == grid) return;
         _grid = grid;
-        AppSettings.Current.GridView = grid;
+        Host?.SetFolderGrid(grid);
+        ApplyMode();
+        LoadThumbnails();
+    }
+
+    /// <summary>Shows the folder as tiles or rows (each folder remembers its own choice).</summary>
+    public void ShowAsGrid(bool grid)
+    {
+        if (_grid == grid) return;
+        _grid = grid;
         ApplyMode();
     }
+
+    public bool IsGrid => _grid;
 
     void ApplyMode()
     {
@@ -528,11 +567,16 @@ public partial class FileListView : UserControl
     {
         var first = sel[0];
         var files = sel.Where(i => !i.IsFolder).ToList();
+        var canPin = files.Count > 0 && Host?.IsVirtualView != true;
         return Menus.Build(
             Menus.Item("Открыть", Icons.Open, () => Host?.OpenItem(first), "Enter"),
             first.IsFolder ? Menus.Item("Открыть в новой вкладке", Icons.Plus, () => Host?.OpenInNewTab(first.FullPath))
                            : Menus.Item("Открыть с помощью…", Icons.OpenWith, () => Shell.OpenWith(first.FullPath)),
-            files.Count > 0 ? Menus.Item(files.All(f => f.IsPinned) ? "Показать на холсте" : "Закрепить на холсте", Icons.Pin, () => Host?.PinItems(files)) : null,
+            canPin ? Menus.Item(files.All(f => f.IsPinned) ? "Показать на холсте" : "Закрепить на холсте", Icons.Pin, () => Host?.PinItems(files)) : null,
+            sel.Count == 1 && first.IsFolder && Host?.IsFavorite(first.FullPath) == false
+                ? Menus.Item("Добавить в избранное", Icons.Star, () => Host?.AddFavorite(first.FullPath)) : null,
+            TagsMenu(sel),
+            Host?.IsVirtualView == true && sel.Count == 1 ? Menus.Item("Показать в папке", Icons.Folder, () => Host?.ShowInFolder(first.FullPath)) : null,
             Menus.Sep(),
             Menus.Item("Вырезать", Icons.Cut, () => Shell.SetClipboard(sel.Select(i => i.FullPath), true), "Ctrl+X"),
             Menus.Item("Копировать", Icons.Copy, () => Shell.SetClipboard(sel.Select(i => i.FullPath), false), "Ctrl+C"),
@@ -544,9 +588,33 @@ public partial class FileListView : UserControl
             Menus.Item("Свойства", Icons.Info, () => Shell.ShowProperties(first.FullPath), "Alt+Enter"));
     }
 
+    /// <summary>"Теги ›": every tag with a check mark (on all selected = checked), then "Новый тег…".</summary>
+    MenuItem TagsMenu(IReadOnlyList<FileItem> sel)
+    {
+        var paths = sel.Select(i => i.FullPath).ToList();
+        var store = TagStore.Current;
+        var items = new List<object?>();
+        foreach (var tag in store.Tags)
+        {
+            var all = paths.All(p => store.Has(p, tag.Id));
+            items.Add(Menus.Check(tag.Name, TagMark.Visual(tag, 9, 13), all, () => store.Set(paths, tag.Id, !all)));
+        }
+        if (items.Count > 0) items.Add(Menus.Sep());
+        items.Add(Menus.Item("Новый тег…", Icons.Plus, () => Host?.NewTag(paths)));
+        return Menus.Sub("Теги", Icons.Tag, items.ToArray());
+    }
+
+    /// <summary>Re-reads tag marks of the shown items (tags were created, changed or assigned).</summary>
+    public void RefreshTags()
+    {
+        foreach (var it in _items) it.Tags = TagMark.For(it.FullPath);
+    }
+
     ContextMenu BuildFolderMenu()
     {
         var hasCanvas = Host?.HasCanvas == true;
+        if (Host?.IsVirtualView == true)
+            return Menus.Build(Menus.Item("Обновить", Icons.Refresh, () => Host?.RefreshFolder(), "F5"));
         return Menus.Build(
             Menus.Item("Вставить", Icons.Paste, Paste, "Ctrl+V", enabled: Shell.CanPaste()),
             Menus.Sub("Создать", Icons.NewFile,

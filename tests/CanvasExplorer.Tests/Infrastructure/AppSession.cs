@@ -84,6 +84,67 @@ sealed class AppSession : IDisposable
         File.SetAttributes(path, FileAttributes.Hidden);
     }
 
+    /// <summary>Replaces the seeded settings (before <see cref="Launch"/>); window geometry is kept fixed.</summary>
+    public void SeedSettings(string extraJsonProperties)
+    {
+        File.WriteAllText(Path.Combine(Data, "settings.json"),
+            "{ \"WinLeft\": 60, \"WinTop\": 40, \"WinWidth\": 1180, \"WinHeight\": 740, \"SidebarWidth\": 196, " + extraJsonProperties + " }");
+    }
+
+    public string TagsPath => Path.Combine(Data, "tags.json");
+
+    /// <summary>Tags known before launch: (id, name, colour or null, icon or null).</summary>
+    public void SeedTags(params (string Id, string Name, string? Color, string? Icon)[] tags)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            tags = tags.Select(t => new { id = t.Id, name = t.Name, color = t.Color, icon = t.Icon }),
+            files = new Dictionary<string, string[]>(),
+        });
+        File.WriteAllText(TagsPath, json);
+    }
+
+    public JsonElement Tags()
+    {
+        for (var i = 0; ; i++)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(TagsPath));
+                return doc.RootElement.Clone();
+            }
+            catch (Exception) when (i < 10) { Thread.Sleep(50); }
+        }
+    }
+
+    /// <summary>Tag ids on a file, from tags.json.</summary>
+    public IReadOnlyList<string> TagIdsOf(string path)
+    {
+        if (!File.Exists(TagsPath)) return Array.Empty<string>();
+        var files = Tags().GetProperty("files");
+        foreach (var f in files.EnumerateObject())
+            if (string.Equals(f.Name, path, StringComparison.OrdinalIgnoreCase))
+                return f.Value.EnumerateArray().Select(v => v.GetString()!).ToList();
+        return Array.Empty<string>();
+    }
+
+    /// <summary>A row of the left panel (favorite, drive or tag) by its label.</summary>
+    public AutomationElement? FindSideItem(string name) => FindByName(name, ControlType.RadioButton);
+
+    public AutomationElement SideItem(string name) => Wait.For(() => FindSideItem(name), 5000, $"в левой панели нет «{name}»");
+
+    /// <summary>Empty space of the left panel, under its last row ("Новый тег").</summary>
+    public Point SidebarEmptySpot()
+    {
+        var b = Bounds(Get("NewTagBtn"));
+        return new Point(b.X + b.Width / 2, b.Bottom + 40);
+    }
+
+    /// <summary>The small number at the right of a tag row.</summary>
+    public string? SideCount(string tagName) =>
+        SideItem(tagName).FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text))
+            .Cast<AutomationElement>().Select(e => e.Current.Name).FirstOrDefault(n => n.All(char.IsDigit));
+
     public JsonElement Settings()
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Data, "settings.json")));

@@ -21,17 +21,16 @@ sealed class FolderTab
     public readonly Stack<string> Forward = new();
 }
 
-public partial class MainWindow : Window, IExplorerHost
+public partial class MainWindow : Window, IExplorerHost, ISidebarHost
 {
-    static readonly Guid DownloadsId = new("374DE290-123F-4565-9164-39C4925E467B");
-
     readonly FileListView _list = new();
+    readonly Sidebar _sidebar;
+    readonly DispatcherTimer _drivesTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
     readonly List<FolderTab> _tabs = new();
     FolderTab _tab = new();
     FolderTab? _justOpened;
     readonly DispatcherTimer _tabHoverTimer = new() { Interval = TimeSpan.FromMilliseconds(550) };
     FolderTab? _tabHoverTarget;
-    readonly List<RadioButton> _sideItems = new();
     readonly DispatcherTimer _refreshTimer;
     readonly DispatcherTimer _settingsTimer;
     readonly HashSet<string> _changedFiles = new(StringComparer.OrdinalIgnoreCase);
@@ -98,7 +97,7 @@ public partial class MainWindow : Window, IExplorerHost
         LocationChanged += (_, _) => ScheduleSettingsSave();
         SizeChanged += (_, _) => ScheduleSettingsSave();
         // The folder may have been deleted or renamed elsewhere while the window was in the background.
-        Activated += (_, _) => { if (_current != null && !Directory.Exists(_current)) RefreshFolder(); };
+        Activated += (_, _) => { if (_current != null && !IsTag(_current) && !Directory.Exists(_current)) RefreshFolder(); };
 
         StateChanged += (_, _) => { OnStateChanged(); ScheduleSettingsSave(); };
         SourceInitialized += (_, _) => OnSourceInitialized();
@@ -112,10 +111,17 @@ public partial class MainWindow : Window, IExplorerHost
         };
 
         RestoreWindowBounds();
-        BuildSidebar();
+        _sidebar = new Sidebar(SidePanel, SideBorder, this);
+        _sidebar.Build();
+        _drivesTimer.Tick += (_, _) => { _drivesTimer.Stop(); _sidebar.Build(); };
+        TagStore.Current.Changed += (_, _) => Dispatcher.BeginInvoke(OnTagsChanged);
     }
 
-    public string? CurrentFolder => _current;
+    /// <summary>The real folder shown; null while a tag view is open.</summary>
+    public string? CurrentFolder => _current != null && !IsTag(_current) ? _current : null;
+    public string? CurrentLocation => _current;
+    public bool IsVirtualView => _current != null && IsTag(_current);
+    public Window OwnerWindow => this;
     public IntPtr Hwnd => _hwnd;
     public bool HasCanvas => CanvasArea.HasCanvas;
 
@@ -149,6 +155,19 @@ public partial class MainWindow : Window, IExplorerHost
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, 4);
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_BORDER_COLOR, ref border, 4);
         OnStateChanged();
+        HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
+    }
+
+    IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_DEVICECHANGE = 0x0219, DBT_DEVICEARRIVAL = 0x8000, DBT_DEVICEREMOVECOMPLETE = 0x8004;
+        // A flash drive or network drive came or went: rebuild the drive list (debounced, events come in bursts).
+        if (msg == WM_DEVICECHANGE && (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE))
+        {
+            _drivesTimer.Stop();
+            _drivesTimer.Start();
+        }
+        return IntPtr.Zero;
     }
 
     void OnStateChanged()
@@ -164,7 +183,7 @@ public partial class MainWindow : Window, IExplorerHost
     {
         var s = AppSettings.Current;
         foreach (var path in s.Tabs ?? new List<string>())
-            if (Directory.Exists(path)) _tabs.Add(new FolderTab { Path = path });
+            if (LocationExists(path)) _tabs.Add(new FolderTab { Path = path });
         var active = Math.Clamp(s.ActiveTab, 0, Math.Max(0, _tabs.Count - 1));
 
         var args = Environment.GetCommandLineArgs();
@@ -218,114 +237,51 @@ public partial class MainWindow : Window, IExplorerHost
         s.WinTop = r.Top;
         s.WinWidth = r.Width;
         s.WinHeight = r.Height;
-        s.LastFolder = _current;
+        s.LastFolder = CurrentFolder ?? s.LastFolder;
         s.Tabs = _tabs.Select(t => t.Path).ToList();
         s.ActiveTab = _tabs.IndexOf(_tab);
         s.Save();
     }
 
-    // ---------- sidebar ----------
+    // ---------- locations: folders and tag views ----------
 
-    void BuildSidebar()
+    static bool IsTag(string location) => location.StartsWith(Sidebar.TagPrefix, StringComparison.Ordinal);
+
+    static TagDef? TagOf(string location) => IsTag(location) ? TagStore.Current.Find(location[Sidebar.TagPrefix.Length..]) : null;
+
+    static bool LocationExists(string location) => IsTag(location) ? TagOf(location) != null : Directory.Exists(location);
+
+    /// <summary>Tags were created, changed or (un)assigned: update marks, counts, an open tag view.</summary>
+    void OnTagsChanged()
     {
-        AddSection("Избранное");
-        AddSideItem("Рабочий стол", Icons.Desktop, Environment.GetFolderPath(Environment.SpecialFolder.Desktop));
-        AddSideItem("Загрузки", Icons.Download, KnownFolder(DownloadsId));
-        AddSideItem("Документы", Icons.Doc, Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
-        AddSideItem("Изображения", Icons.Image, Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
-        AddSideItem("Музыка", Icons.Music, Environment.GetFolderPath(Environment.SpecialFolder.MyMusic));
-        AddSideItem("Видео", Icons.Video, Environment.GetFolderPath(Environment.SpecialFolder.MyVideos));
-        AddSideItem("Пользователь", Icons.Home, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-
-        AddSection("Расположения");
-        foreach (var d in DriveInfo.GetDrives())
+        _list.RefreshTags();
+        CanvasArea.RefreshTags();
+        if (_current != null && IsTag(_current))
         {
-            if (!d.IsReady) continue;
-            AddSideItem(DriveLabel(d), Icons.Drive, d.RootDirectory.FullName);
+            if (TagOf(_current) == null) return;
+            Title = LocationTitle(_current);
+            UpdateCrumbs();
+            RefreshFolder();
         }
+        RenderTabs();
     }
 
-    static string? KnownFolder(Guid id) =>
-        Native.SHGetKnownFolderPath(id, 0, IntPtr.Zero, out var path) == 0 ? path : null;
+    public bool IsFavorite(string path) => Sidebar.IsFavorite(path);
 
-    static string DriveLabel(DriveInfo d)
+    public void ShowInFolder(string path)
     {
-        var letter = d.Name.TrimEnd('\\');
-        string label;
-        try { label = d.VolumeLabel; } catch { label = ""; }
-        if (string.IsNullOrWhiteSpace(label))
-            label = d.DriveType switch
-            {
-                DriveType.Removable => "Съёмный диск",
-                DriveType.Network => "Сетевой диск",
-                DriveType.CDRom => "Дисковод",
-                _ => "Локальный диск",
-            };
-        return $"{label} ({letter})";
+        if (Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(path)) is not { } folder) return;
+        NavigateTo(folder);
+        _pendingReveal = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
     }
 
-    void AddSection(string title)
-    {
-        var tb = new TextBlock
-        {
-            Text = title,
-            FontSize = 11,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(8, SidePanel.Children.Count == 0 ? 0 : 14, 0, 4),
-        };
-        tb.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
-        SidePanel.Children.Add(tb);
-    }
+    public void AddFavorite(string path) => _sidebar.AddFavorite(path);
 
-    void AddSideItem(string label, Geometry icon, string? path)
-    {
-        if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return;
-        var content = new DockPanel();
-        var ic = new UiIcon(icon, 15) { Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
-        ic.SetResourceReference(UiIcon.ForegroundProperty, "SubBrush");
-        DockPanel.SetDock(ic, Dock.Left);
-        content.Children.Add(ic);
-        content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+    public void NewTag(IReadOnlyList<string> assignTo) => _sidebar.NewTag(null, assignTo);
 
-        var rb = new RadioButton
-        {
-            Content = content,
-            Tag = path,
-            GroupName = "Side",
-            Style = (Style)FindResource("SideItem"),
-            ToolTip = path,
-        };
-        ToolTipService.SetInitialShowDelay(rb, 1200);
-        System.Windows.Automation.AutomationProperties.SetName(rb, label);
-        rb.Click += (_, _) => NavigateTo(path);
-        rb.AllowDrop = true;
-        rb.DragOver += (_, e) =>
-        {
-            e.Effects = e.Data.GetData(DataFormats.FileDrop) is string[] files
-                ? Shell.DropEffect(files, path, e.KeyStates, e.AllowedEffects)
-                : DragDropEffects.None;
-            e.Handled = true;
-        };
-        rb.Drop += (_, e) => { e.Effects = Shell.Drop(e, path, _hwnd); e.Handled = true; };
-        rb.PreviewMouseDown += (_, e) =>
-        {
-            if (e.ChangedButton != MouseButton.Middle) return;
-            OpenInNewTab(path);
-            e.Handled = true;
-        };
-        _sideItems.Add(rb);
-        SidePanel.Children.Add(rb);
-    }
-
-    void HighlightSidebar()
+    public void SetFolderGrid(bool grid)
     {
-        foreach (var rb in _sideItems)
-        {
-            var on = Shell.SameFolder(rb.Tag as string, _current);
-            rb.IsChecked = on;
-            if (rb.Content is DockPanel dp && dp.Children.Count > 0 && dp.Children[0] is UiIcon ic)
-                ic.SetResourceReference(UiIcon.ForegroundProperty, on ? "AccentBrush" : "SubBrush");
-        }
+        if (_current != null) AppSettings.Current.SetGrid(_current, grid);
     }
 
     // ---------- navigation ----------
@@ -334,6 +290,17 @@ public partial class MainWindow : Window, IExplorerHost
 
     void NavigateTo(string path, bool addHistory)
     {
+        if (IsTag(path))
+        {
+            if (TagOf(path) == null || path == _current) return;
+            if (addHistory && _current != null)
+            {
+                _tab.Back.Push(_current);
+                _tab.Forward.Clear();
+            }
+            Show(path);
+            return;
+        }
         string full;
         try { full = Path.GetFullPath(path); }
         catch { return; }
@@ -343,7 +310,7 @@ public partial class MainWindow : Window, IExplorerHost
             System.Media.SystemSounds.Beep.Play();
             return;
         }
-        if (_current != null && Shell.SameFolder(_current, full)) return;
+        if (_current != null && !IsTag(_current) && Shell.SameFolder(_current, full)) return;
         if (addHistory && _current != null)
         {
             _tab.Back.Push(_current);
@@ -359,13 +326,20 @@ public partial class MainWindow : Window, IExplorerHost
         if (_current != null && ChildOnTheWay(folder, _current) is { } child) _pendingReveal = child;
         _current = folder;
         _tab.Path = folder;
-        Title = FolderName(folder);
+        Title = LocationTitle(folder);
         RenderTabs();
         SearchBox.Text = "";
         UpdateCrumbs();
         UpdateNavButtons();
-        HighlightSidebar();
-        Watch(folder);
+        _sidebar.Highlight();
+        // Each folder remembers whether it is shown as a list or as tiles.
+        _list.ShowAsGrid(AppSettings.Current.IsGrid(folder));
+        if (IsTag(folder))
+        {
+            _watcher?.Dispose();
+            _watcher = null;
+        }
+        else Watch(folder);
         _changedFiles.Clear();
         _ = LoadItemsAsync(keepCanvas: false);
         ScheduleSettingsSave();
@@ -387,7 +361,7 @@ public partial class MainWindow : Window, IExplorerHost
 
     public void GoUp()
     {
-        if (_current == null) return;
+        if (_current == null || IsTag(_current)) return;
         var parent = Directory.GetParent(_current);
         if (parent == null) return;
         NavigateTo(parent.FullName);
@@ -399,7 +373,7 @@ public partial class MainWindow : Window, IExplorerHost
     {
         BackBtn.IsEnabled = _tab.Back.Count > 0;
         ForwardBtn.IsEnabled = _tab.Forward.Count > 0;
-        UpBtn.IsEnabled = _current != null && Directory.GetParent(_current) != null;
+        UpBtn.IsEnabled = _current != null && !IsTag(_current) && Directory.GetParent(_current) != null;
     }
 
     async Task LoadItemsAsync(bool keepCanvas)
@@ -410,16 +384,17 @@ public partial class MainWindow : Window, IExplorerHost
         var keep = keepCanvas ? new HashSet<string>(_list.Selected.Select(i => i.Name), StringComparer.OrdinalIgnoreCase) : null;
         List<FileItem> items;
         string? error = null;
+        var tag = TagOf(folder);
         try
         {
-            items = await Task.Run(() => Enumerate(folder));
+            items = tag != null ? await Task.Run(() => EnumerateTag(tag.Id)) : await Task.Run(() => Enumerate(folder));
         }
         catch (UnauthorizedAccessException)
         {
             items = new List<FileItem>();
             error = "Нет доступа к этой папке";
         }
-        catch (DirectoryNotFoundException) when (!Directory.Exists(folder))
+        catch (DirectoryNotFoundException) when (tag == null && !Directory.Exists(folder))
         {
             // The open folder was deleted or renamed elsewhere: step up to the nearest folder that still exists.
             if (version == _loadVersion && folder == _current && NearestExisting(folder) is { } up) Show(up);
@@ -435,7 +410,13 @@ public partial class MainWindow : Window, IExplorerHost
         _list.SetItems(items, keep);
         if (!keepCanvas) _list.PlayEnter();
         if (error != null) _list.ShowMessage(error);
-        if (keepCanvas) CanvasArea.SyncItems(items);
+        else if (tag != null && items.Count == 0) _list.ShowMessage("Нет файлов с тегом «" + tag.Name + "».\nНазначьте его через меню файла «Теги» или перетащите файлы на тег.");
+        if (tag != null)
+        {
+            // Files from many folders: no canvas here.
+            if (!keepCanvas) CanvasArea.LoadVirtual();
+        }
+        else if (keepCanvas) CanvasArea.SyncItems(items);
         else CanvasArea.LoadFolder(folder, items);
         SyncPinnedFlags();
 
@@ -476,9 +457,29 @@ public partial class MainWindow : Window, IExplorerHost
         // Enumerating also throws UnauthorizedAccessException for the folder itself, which the caller reports.
         var list = dir.EnumerateFileSystemInfos("*", options)
             .Where(i => i.Name != LayoutStore.FileName && !i.Name.EndsWith(".~tmp", StringComparison.OrdinalIgnoreCase))
-            .Select(i => new FileItem(i))
+            .Select(i => new FileItem(i) { Tags = TagMark.For(i.FullName) })
             .ToList();
+        SortItems(list);
+        return list;
+    }
+
+    static void SortItems(List<FileItem> list) =>
         list.Sort((a, b) => a.IsFolder != b.IsFolder ? (a.IsFolder ? -1 : 1) : Native.StrCmpLogicalW(a.Name, b.Name));
+
+    /// <summary>Everything that carries the tag, from any folder.</summary>
+    static List<FileItem> EnumerateTag(string tagId)
+    {
+        var list = new List<FileItem>();
+        foreach (var path in TagStore.Current.PathsOf(tagId))
+        {
+            try
+            {
+                FileSystemInfo info = Directory.Exists(path) ? new DirectoryInfo(path) : new FileInfo(path);
+                if (info.Exists) list.Add(new FileItem(info) { Tags = TagMark.For(path) });
+            }
+            catch { }
+        }
+        SortItems(list);
         return list;
     }
 
@@ -540,6 +541,9 @@ public partial class MainWindow : Window, IExplorerHost
 
     void OnRenamed(string? oldName, string? newName, string fullPath)
     {
+        // Tags follow a file renamed by any program.
+        if (oldName != null && newName != null && Path.GetDirectoryName(fullPath) is { } dir)
+            TagStore.Current.Move(Path.Combine(dir, oldName), fullPath);
         // Editors often save by writing a temporary file and renaming it over the original.
         var replaced = newName != null && oldName != null && CanvasArea.PinnedNames.Contains(newName, StringComparer.OrdinalIgnoreCase);
         if (oldName != null && newName != null && File.Exists(fullPath) && !replaced)
@@ -554,13 +558,33 @@ public partial class MainWindow : Window, IExplorerHost
     static string FolderName(string path)
     {
         var name = Path.GetFileName(path.TrimEnd('\\'));
-        return string.IsNullOrEmpty(name) ? DriveLabel(new DriveInfo(path)) : name;
+        if (!string.IsNullOrEmpty(name)) return name;
+        try { return Sidebar.DriveLabel(new DriveInfo(path)); }
+        catch { return path; }
     }
+
+    /// <summary>Tab and window title: a folder name, or the tag's name for a tag view.</summary>
+    static string LocationTitle(string location) =>
+        IsTag(location) ? TagOf(location)?.Name ?? "Тег" : FolderName(location);
 
     void UpdateCrumbs()
     {
         Crumbs.Children.Clear();
         if (_current == null) return;
+        if (TagOf(_current) is { } tag)
+        {
+            AddCrumbText("Теги", 0);
+            var chevron = new UiIcon(Icons.Chevron, 11, 2.4) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(1, 0, 5, 0) };
+            chevron.SetResourceReference(UiIcon.ForegroundProperty, "FaintBrush");
+            Crumbs.Children.Add(chevron);
+            var mark = TagMark.Visual(tag, 9, 13);
+            mark.Margin = new Thickness(0, 0, 6, 0);
+            Crumbs.Children.Add(mark);
+            var name = new TextBlock { Text = tag.Name, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+            name.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+            Crumbs.Children.Add(name);
+            return;
+        }
         var parts = new List<string>();
         for (var d = new DirectoryInfo(_current); d != null; d = d.Parent) parts.Add(d.FullName);
         parts.Reverse();
@@ -622,7 +646,7 @@ public partial class MainWindow : Window, IExplorerHost
 
     void BeginPathEdit()
     {
-        PathEdit.Text = _current ?? "";
+        PathEdit.Text = CurrentFolder ?? "";
         Crumbs.Visibility = Visibility.Collapsed;
         PathEdit.Visibility = Visibility.Visible;
         PathEdit.Focus();
@@ -678,8 +702,8 @@ public partial class MainWindow : Window, IExplorerHost
 
     public void OpenInNewTab(string path)
     {
-        if (!Directory.Exists(path)) return;
-        var tab = new FolderTab { Path = Path.GetFullPath(path) };
+        if (!LocationExists(path)) return;
+        var tab = new FolderTab { Path = IsTag(path) ? path : Path.GetFullPath(path) };
         _tabs.Insert(_tabs.IndexOf(_tab) + 1, tab);
         _justOpened = tab;
         SwitchTo(tab);
@@ -742,11 +766,20 @@ public partial class MainWindow : Window, IExplorerHost
     FrameworkElement MakeTab(FolderTab tab)
     {
         var active = tab == _tab;
-        var icon = new UiIcon(Icons.Folder, 13) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0) };
-        icon.SetResourceReference(UiIcon.ForegroundProperty, active ? "AccentBrush" : "MutedBrush");
+        var tabTag = TagOf(tab.Path);
+        FrameworkElement icon;
+        if (tabTag != null) icon = TagMark.Visual(tabTag, 9, 13);
+        else
+        {
+            var folderIcon = new UiIcon(Icons.Folder, 13);
+            folderIcon.SetResourceReference(UiIcon.ForegroundProperty, active ? "AccentBrush" : "MutedBrush");
+            icon = folderIcon;
+        }
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        icon.Margin = new Thickness(0, 0, 7, 0);
         var title = new TextBlock
         {
-            Text = FolderName(tab.Path),
+            Text = LocationTitle(tab.Path),
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
@@ -815,15 +848,21 @@ public partial class MainWindow : Window, IExplorerHost
         border.DragLeave += (_, _) => { if (_tabHoverTarget == tab) _tabHoverTimer.Stop(); };
         border.DragOver += (_, e) =>
         {
-            e.Effects = e.Data.GetData(DataFormats.FileDrop) is string[] files
-                ? Shell.DropEffect(files, tab.Path, e.KeyStates, e.AllowedEffects)
-                : DragDropEffects.None;
+            e.Effects = e.Data.GetData(DataFormats.FileDrop) is not string[] files ? DragDropEffects.None
+                : tabTag != null ? DragDropEffects.Link
+                : Shell.DropEffect(files, tab.Path, e.KeyStates, e.AllowedEffects);
             e.Handled = true;
         };
         border.Drop += (_, e) =>
         {
             _tabHoverTimer.Stop();
-            e.Effects = Shell.Drop(e, tab.Path, _hwnd);
+            // Files dropped on a tag tab get the tag; on a folder tab they are moved or copied there.
+            if (tabTag != null && e.Data.GetData(DataFormats.FileDrop) is string[] files)
+            {
+                TagStore.Current.Set(files, tabTag.Id, true);
+                e.Effects = DragDropEffects.Link;
+            }
+            else e.Effects = Shell.Drop(e, tab.Path, _hwnd);
             e.Handled = true;
         };
 
@@ -917,6 +956,7 @@ public partial class MainWindow : Window, IExplorerHost
                 else Directory.Move(path, dest);
             }
             else File.Move(path, dest);
+            TagStore.Current.Move(path, dest);
             return true;
         }
         catch (Exception ex)
@@ -928,7 +968,7 @@ public partial class MainWindow : Window, IExplorerHost
 
     public void CreateFolder()
     {
-        if (_current == null) return;
+        if (CurrentFolder == null || _current == null) return;
         var name = "Новая папка";
         for (var i = 2; Directory.Exists(Path.Combine(_current, name)) || File.Exists(Path.Combine(_current, name)); i++)
             name = $"Новая папка ({i})";
@@ -947,7 +987,7 @@ public partial class MainWindow : Window, IExplorerHost
 
     public void CreateFile(string baseName, string extension)
     {
-        if (_current == null) return;
+        if (CurrentFolder == null || _current == null) return;
         var name = baseName + extension;
         for (var i = 2; File.Exists(Path.Combine(_current, name)) || Directory.Exists(Path.Combine(_current, name)); i++)
             name = $"{baseName} ({i}){extension}";

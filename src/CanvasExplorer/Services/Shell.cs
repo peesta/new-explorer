@@ -32,13 +32,32 @@ public static class Shell
     {
         var list = paths.ToList();
         var flags = (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR);
-        if (list.Any(p => SameFolder(Path.GetDirectoryName(p), destFolder)))
-            flags |= FOF_RENAMEONCOLLISION;
-        return Run(FO_COPY, list, destFolder, flags, owner);
+        var sameFolder = list.Any(p => SameFolder(Path.GetDirectoryName(p), destFolder));
+        if (sameFolder) flags |= FOF_RENAMEONCOLLISION;
+        var ok = Run(FO_COPY, list, destFolder, flags, owner);
+        // Copies to another folder keep the name, so they can get the same tags.
+        if (!sameFolder)
+            foreach (var p in list)
+            {
+                var target = Path.Combine(destFolder, Path.GetFileName(Path.TrimEndingDirectorySeparator(p)));
+                if (File.Exists(target) || Directory.Exists(target)) TagStore.Current.Copy(p, target);
+            }
+        return ok;
     }
 
-    public static bool Move(IEnumerable<string> paths, string destFolder, IntPtr owner) =>
-        Run(FO_MOVE, paths, destFolder, (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR), owner);
+    public static bool Move(IEnumerable<string> paths, string destFolder, IntPtr owner)
+    {
+        var list = paths.ToList();
+        var ok = Run(FO_MOVE, list, destFolder, (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR), owner);
+        // Tags travel with moved files (each one that actually arrived).
+        foreach (var p in list)
+        {
+            var target = Path.Combine(destFolder, Path.GetFileName(Path.TrimEndingDirectorySeparator(p)));
+            if (!File.Exists(p) && !Directory.Exists(p) && (File.Exists(target) || Directory.Exists(target)))
+                TagStore.Current.Move(p, target);
+        }
+        return ok;
+    }
 
     static bool Run(uint func, IEnumerable<string> paths, string? to, ushort flags, IntPtr owner)
     {

@@ -150,6 +150,27 @@ public partial class CanvasView : UserControl
         RaisePinsChanged();
     }
 
+    /// <summary>A view gathered from many folders (files with a tag): just the list, no canvas.</summary>
+    public void LoadVirtual()
+    {
+        SaveNow();
+        StopAnimation();
+        ClearPins();
+        _missing.Clear();
+        _folder = null;
+        _layout = null;
+        _docked = false;
+        EnterDocked();
+        _listFrame.Edges = ResizeEdges.None;
+        RaisePinsChanged();
+    }
+
+    /// <summary>Tags changed: pinned windows update the marks in their headers.</summary>
+    public void RefreshTags()
+    {
+        foreach (var pw in _pins) pw.RefreshTags();
+    }
+
     void RestorePins(IReadOnlyList<FileItem> items)
     {
         _missing.Clear();
@@ -374,7 +395,7 @@ public partial class CanvasView : UserControl
         if (!HasCanvas)
         {
             // Pulling a side edge of the docked list inward creates the canvas.
-            if (_listFrame.ActualWidth < Surface.ActualWidth - 40)
+            if (_folder != null && _listFrame.ActualWidth < Surface.ActualWidth - 40)
             {
                 var b = _listFrame.Bounds;
                 CreateCanvas(new Rect(b.X, 0, b.Width, Surface.ActualHeight));

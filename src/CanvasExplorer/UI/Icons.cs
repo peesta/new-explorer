@@ -57,6 +57,37 @@ public static class Icons
     public static readonly Geometry NewFile = G("M6 3h8l4 4v14H6zM14 3v4h4M12 11v6M9 14h6");
     public static readonly Geometry TextFile = G("M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 15h6M9 18h4");
 
+    public static readonly Geometry Tag = G("M3 12V4h8l10 10-8 8zM7.5 7.5h.01");
+    public static readonly Geometry ArrowUp = G("M12 19V5M6 11l6-6 6 6");
+    public static readonly Geometry ArrowDown = G("M12 5v14M6 13l6 6 6-6");
+    public static readonly Geometry Check = G("M5 12l5 5 9-10");
+
+    // Tag icons, as in the mockup ("Тёмная · вариант A").
+    public static readonly Geometry Bookmark = G("M6 3h12v18l-6-4-6 4z");
+    public static readonly Geometry Sofa = G("M4 11V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3M3 11h18v6H3zM5 17v2M19 17v2");
+    public static readonly Geometry Star = G("M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z");
+    public static readonly Geometry Heart = G("M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z");
+    public static readonly Geometry Flag = G("M5 21V4h11l-2 4 2 4H5");
+    public static readonly Geometry Cart = G("M3 4h2l2 11h11l2-8H6M9 20h.01M17 20h.01");
+    public static readonly Geometry Flame = G("M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-7 2 1 3 3 3 5");
+    public static readonly Geometry Bulb = G("M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z");
+    public static readonly Geometry Briefcase = G("M3 7h18v13H3zM8 7V4h8v3");
+    public static readonly Geometry Eye = G("M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z");
+    public static readonly Geometry Lock = G("M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4");
+    public static readonly Geometry Pen = G("M4 20h4L19 9l-4-4L4 16z");
+    public static readonly Geometry Key = G("M8 15a4 4 0 1 0 0-8a4 4 0 1 0 0 8zM11 11h10M18 11v3M21 11v2");
+
+    /// <summary>The 16 icons a tag can have: stored key, Russian name, shape.</summary>
+    public static readonly (string Key, string Label, Geometry Icon)[] TagIcons =
+    {
+        ("bookmark", "Закладка", Bookmark), ("sofa", "Мебель", Sofa), ("star", "Звезда", Star), ("heart", "Сердце", Heart),
+        ("flag", "Флаг", Flag), ("cart", "Корзина", Cart), ("flame", "Огонь", Flame), ("bulb", "Идея", Bulb),
+        ("home", "Дом", Home), ("briefcase", "Работа", Briefcase), ("music", "Музыка", Music), ("image", "Фото", Image),
+        ("eye", "Глаз", Eye), ("lock", "Замок", Lock), ("pen", "Карандаш", Pen), ("key", "Ключ", Key),
+    };
+
+    public static Geometry? TagIcon(string? key) => TagIcons.FirstOrDefault(i => i.Key == key).Icon;
+
     static Geometry G(string data)
     {
         var g = Geometry.Parse(data);

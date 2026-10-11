@@ -21,7 +21,7 @@
 
             <!-- Sidebar (resizable horizontally; its right outline lights up while resizing) -->
             <Grid WindowChrome.IsHitTestVisibleInChrome="True">
-                <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="8">
+                <Border x:Name="SideBorder" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="8">
                     <ScrollViewer Style="{StaticResource OverlayScroll}" VerticalScrollBarVisibility="Auto" Padding="6,10,6,10">
                         <StackPanel x:Name="SidePanel"/>
                     </ScrollViewer>

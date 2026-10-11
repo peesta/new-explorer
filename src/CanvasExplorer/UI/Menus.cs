@@ -21,6 +21,14 @@ static class Menus
         return mi;
     }
 
+    /// <summary>An item with a check mark on the right (e.g. a tag the file has).</summary>
+    public static MenuItem Check(string header, object? icon, bool isChecked, Action onClick)
+    {
+        var mi = new MenuItem { Header = header, Icon = icon, IsCheckable = true, IsChecked = isChecked, StaysOpenOnClick = false };
+        mi.Click += (_, _) => onClick();
+        return mi;
+    }
+
     public static Separator Sep() => new();
 
     public static MenuItem Sub(string header, Geometry? icon, params object?[] items)

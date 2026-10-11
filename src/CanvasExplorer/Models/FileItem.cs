@@ -44,6 +44,44 @@ public sealed class FileItem : INotifyPropertyChanged
     public Visibility ExtVisibility => IsFolder ? Visibility.Collapsed : Visibility.Visible;
     public Visibility FolderVisibility => IsFolder ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>Images and videos show a picture instead of the type chip in the tile view.</summary>
+    public bool HasThumbnail => Kind is FileKind.Image or FileKind.Video;
+    public bool IsVideo => Kind == FileKind.Video;
+
+    ImageSource? _thumb;
+    public ImageSource? Thumb
+    {
+        get => _thumb;
+        set
+        {
+            if (_thumb == value) return;
+            _thumb = value;
+            Changed();
+            Changed(nameof(ThumbVisibility));
+            Changed(nameof(TileChipVisibility));
+        }
+    }
+    public Visibility ThumbVisibility => _thumb != null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility TileChipVisibility => _thumb != null ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility VideoBadgeVisibility => _thumb != null && IsVideo ? Visibility.Visible : Visibility.Collapsed;
+
+    IReadOnlyList<TagMark> _tags = Array.Empty<TagMark>();
+    /// <summary>Tag dots and icons shown after the name.</summary>
+    public IReadOnlyList<TagMark> Tags
+    {
+        get => _tags;
+        set
+        {
+            if (SameTags(_tags, value)) return;
+            _tags = value;
+            Changed();
+        }
+    }
+
+    static bool SameTags(IReadOnlyList<TagMark> a, IReadOnlyList<TagMark> b) =>
+        a.Count == b.Count && a.Zip(b).All(p => p.First.Id == p.Second.Id && p.First.Name == p.Second.Name &&
+                                                p.First.Dot == p.Second.Dot && p.First.Icon == p.Second.Icon);
+
     bool _pinned;
     public bool IsPinned
     {

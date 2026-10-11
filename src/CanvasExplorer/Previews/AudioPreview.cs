@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using CanvasExplorer.Models;
+using CanvasExplorer.Services;
 using CanvasExplorer.UI;
 using NAudio.Wave;
 
@@ -48,7 +49,14 @@ public sealed class AudioPreview : PreviewContent
         _volume.Width = 64;
         _volume.Height = 16;
         _volume.VerticalAlignment = VerticalAlignment.Center;
-        _volume.ValueChanged += (_, v) => { if (_output != null) _output.Volume = (float)v; };
+        // Every player starts at the level last set in any player (remembered across canvases and restarts).
+        _volume.Value = Math.Clamp(AppSettings.Current.AudioVolume, 0, 1);
+        _volume.ValueChanged += (_, v) =>
+        {
+            if (_output != null) _output.Volume = (float)v;
+            AppSettings.Current.AudioVolume = Math.Round(v, 3);
+            AppSettings.ScheduleSave();
+        };
 
         var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(startBtn);
@@ -354,12 +362,42 @@ public sealed class VolumeBar : FrameworkElement
     public VolumeBar()
     {
         Cursor = Cursors.Hand;
+        System.Windows.Automation.AutomationProperties.SetName(this, "Громкость");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(this, "Volume");
+    }
+
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new VolumePeer(this);
+
+    /// <summary>Screen readers and UI automation see the bar as a slider (0…100).</summary>
+    sealed class VolumePeer(VolumeBar owner) : System.Windows.Automation.Peers.FrameworkElementAutomationPeer(owner),
+        System.Windows.Automation.Provider.IRangeValueProvider
+    {
+        protected override System.Windows.Automation.Peers.AutomationControlType GetAutomationControlTypeCore() =>
+            System.Windows.Automation.Peers.AutomationControlType.Slider;
+
+        public override object? GetPattern(System.Windows.Automation.Peers.PatternInterface p) =>
+            p == System.Windows.Automation.Peers.PatternInterface.RangeValue ? this : base.GetPattern(p);
+
+        public double Value => Math.Round(owner.Value * 100);
+        public bool IsReadOnly => false;
+        public double Maximum => 100;
+        public double Minimum => 0;
+        public double LargeChange => 10;
+        public double SmallChange => 5;
+        public void SetValue(double value) => owner.Value = value / 100;
     }
 
     public double Value
     {
         get => _value;
-        set { _value = Math.Clamp(value, 0, 1); InvalidateVisual(); ValueChanged?.Invoke(this, _value); }
+        set
+        {
+            var v = Math.Clamp(value, 0, 1);
+            if (Math.Abs(v - _value) < 1e-9) return;
+            _value = v;
+            InvalidateVisual();
+            ValueChanged?.Invoke(this, _value);
+        }
     }
 
     protected override void OnRender(DrawingContext dc)
